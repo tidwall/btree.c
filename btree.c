@@ -177,6 +177,9 @@ static bool fill_pool(struct btree *btree) {
             }
         }
         struct node *leaf = node_new(btree, true);
+        if (!leaf) {
+            return false;
+        }
         btree->pool.leaves.nodes[btree->pool.leaves.len++] = leaf;
     }
     while (btree->pool.branches.len < btree->height) {
@@ -186,6 +189,9 @@ static bool fill_pool(struct btree *btree) {
             }
         }
         struct node *branch = node_new(btree, false);
+        if (!branch) {
+            return false;
+        }
         btree->pool.branches.nodes[btree->pool.branches.len++] = branch;
     }
     return true;
@@ -315,8 +321,8 @@ static void node_split(struct btree *btree, struct node *node,
         // split so that both left and right have the same number of items.
         mid = (btree->max_items-1)/2;
     }
-    *median = get_item_at(btree->elsize, node, mid);
-    *right = node_new(btree, node->leaf);
+    *median = get_item_at(btree->elsize, node, mid);    
+    *right = node->leaf ? gimme_leaf(btree) : gimme_branch(btree);
     (*right)->leaf = node->leaf;
     (*right)->num_items = node->num_items-(mid+1);
     memmove((*right)->items,
@@ -889,14 +895,17 @@ void btree_print(struct btree *btree, void (*print)(void *item)) {
     }
 }
 
+// btree_oom returns true if the last btree_insert() call failed due to the 
+// system being out of memory.
+bool btree_oom(struct btree *btree) {
+    return btree->oom;
+}
+
 //==============================================================================
 // TESTS AND BENCHMARKS
 // $ cc -DBTREE_TEST btree.c && ./a.out              # run tests
 // $ cc -DBTREE_TEST -O3 btree.c && BENCH=1 ./a.out  # run benchmarks
 //==============================================================================
-// #ifndef BTREE_TEST
-// #define BTREE_TEST
-// #endif
 #ifdef BTREE_TEST
 
 #pragma GCC diagnostic ignored "-Wextra"
@@ -1089,19 +1098,16 @@ void print_int(void *item) {
 #include <stdio.h>
 #include "btree.h"
 
-#ifdef USE_JEMALLOC
-#include <jemalloc/jemalloc.h>
-#endif
-
+static bool rand_alloc_fail = false;
+static int rand_alloc_fail_odds = 3; // 1 in 3 chance malloc will fail.
 static uintptr_t total_allocs = 0;
 static uintptr_t total_mem = 0;
 
 static void *xmalloc(size_t size) {
-#ifdef USE_JEMALLOC
-    void *mem = je_malloc(sizeof(uintptr_t)+size);
-#else
+    if (rand_alloc_fail && rand()%rand_alloc_fail_odds == 0) {
+        return NULL;
+    }
     void *mem = malloc(sizeof(uintptr_t)+size);
-#endif
     assert(mem);
     *(uintptr_t*)mem = size;
     total_allocs++;
@@ -1112,11 +1118,7 @@ static void *xmalloc(size_t size) {
 static void xfree(void *ptr) {
     if (ptr) {
         total_mem -= *(uintptr_t*)((char*)ptr-sizeof(uintptr_t));
-#ifdef USE_JEMALLOC
-        je_free(ptr-sizeof(uintptr_t));
-#else
         free((char*)ptr-sizeof(uintptr_t));
-#endif
         total_allocs--;
     }
 }
@@ -1175,7 +1177,11 @@ static void all() {
         seed, max_items, N, sizeof(int));
     srand(seed);
 
-    int *vals = xmalloc(sizeof(int) * N);
+    rand_alloc_fail = true;
+
+    int *vals;
+    while(!(vals = xmalloc(sizeof(int) * N))){}
+
     for (int i = 0; i < N; i++) {
         vals[i] = i*10;
     }
@@ -1183,7 +1189,8 @@ static void all() {
     struct btree *btree = NULL;
     for (int h = 0; h < 2; h++) {
         if (btree) btree_free(btree);
-        btree = btree_new(sizeof(int), max_items, compare_ints);
+        while (!(btree = btree_new(sizeof(int), max_items, compare_ints))){}
+
         shuffle(vals, N, sizeof(int));
         uint64_t hint = 0;
         uint64_t *hint_ptr = h == 0 ? NULL : &hint;
@@ -1192,10 +1199,22 @@ static void all() {
             int *v;
             v = btree_get_hint(btree, &vals[i], hint_ptr);
             assert(!v);
-            v = btree_set_hint(btree, &vals[i], hint_ptr);
-            assert(!v);
-            v = btree_set_hint(btree, &vals[i], hint_ptr);
-            assert(v && *(int*)v == vals[i]);
+            while (true) {
+                v = btree_set_hint(btree, &vals[i], hint_ptr);
+                assert(!v);
+                if (!btree_oom(btree)) {
+                    break;
+                }
+            }
+            while (true) {
+                v = btree_set_hint(btree, &vals[i], hint_ptr);
+                if (!v) {
+                    assert(btree_oom(btree));
+                } else {
+                    assert(v && *(int*)v == vals[i]);
+                    break;
+                }
+            }
             v = btree_get_hint(btree, &vals[i], hint_ptr);
             assert(v && *(int*)v == vals[i]);
             assert(btree_count(btree) == (size_t)(i+1));
@@ -1285,8 +1304,13 @@ static void all() {
     int min, max;
     for (int i = 0; i < N; i++) {
         int *v;
-        v = btree_set(btree, &vals[i]);
-        assert(!v);
+        while (true) {
+            v = btree_set(btree, &vals[i]);
+            assert(!v);
+            if (!btree_oom(btree)) {
+                break;
+            }
+        }
         if (i == 0) {
             min = vals[i], max = vals[i];
         } else {
@@ -1313,7 +1337,12 @@ static void all() {
     // reinsert
     shuffle(vals, N, sizeof(int));
     for (int i = 0; i < N; i++) {
-        btree_set(btree, &vals[i]);
+        while (true) {
+            assert(!btree_set(btree, &vals[i]));
+            if (!btree_oom(btree)) {
+                break;
+            }
+        }
     }
 
     // pop-max
