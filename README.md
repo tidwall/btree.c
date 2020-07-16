@@ -23,7 +23,7 @@ struct user {
     int age;
 };
 
-int user_compare(const void *a, const void *b) {
+int user_compare(const void *a, const void *b, void *udata) {
     const struct user *ua = a;
     const struct user *ub = b;
     int cmp = strcmp(ua->last, ub->last);
@@ -41,7 +41,7 @@ bool user_iter(const void *a, void *udata) {
 
 int main() {
     // create a new btree where each item is a `struct user`. 
-    struct btree *tr = btree_new(sizeof(struct user), 0, user_compare);
+    struct btree *tr = btree_new(sizeof(struct user), 0, user_compare, NULL);
 
     // load some users into the btree. Each set operation performas a copy of 
     // the data that is pointed to in the second argument.

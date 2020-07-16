@@ -77,7 +77,8 @@ struct pool {
 
 // btree is a standard B-tree with post-set splits.
 struct btree {
-    int (*compare)(const void *a, const void *b);
+    int (*compare)(const void *a, const void *b, void *udata);
+    void *udata;
     struct node *root;
     size_t count;
     struct pool pool;
@@ -246,8 +247,10 @@ static void node_shift_left(size_t elsize, struct node *node, int index,
 // Param `compare` is a function that compares items in the tree. See the 
 // qsort stdlib function for an example of how this function works.
 // The btree must be freed with btree_free(). 
-struct btree *btree_new(size_t elsize, size_t max_items, 
-                        int (*compare)(const void *a, const void *b)) 
+struct btree *btree_new(size_t elsize, size_t max_items,
+                        int (*compare)(const void *a, const void *b, 
+                                       void *udata),
+                        void *udata)
 {
     if (max_items == 0) {
         max_items = 256;
@@ -348,7 +351,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
                 index = node->num_items-1;
             }
             void *item = get_item_at(btree->elsize, node, index);
-            int cmp = btree->compare(key, item);
+            int cmp = btree->compare(key, item, btree->udata);
             if (cmp == 0) {
                 *found = true;
                 return index;
@@ -364,7 +367,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
     while ( low <= high ) {
         int mid = (low + high) / 2;
         void *item = get_item_at(btree->elsize, node, mid);
-        int cmp = btree->compare(key, item);
+        int cmp = btree->compare(key, item, btree->udata);
         if (cmp == 0) {
             *found = true;
             index = mid;
@@ -478,7 +481,7 @@ void *btree_load(struct btree *btree, void *item) {
     if (btree->litem && 
         btree->lnode && 
         btree->lnode->num_items < btree->max_items-2 &&
-        btree->compare(item, btree->litem) > 0)
+        btree->compare(item, btree->litem, btree->udata) > 0)
     {
         set_item_at(btree->elsize, btree->lnode, btree->lnode->num_items, item);
         btree->lnode->num_items++;
@@ -535,8 +538,8 @@ enum delact {
 
 bool node_delete(struct btree *btree, struct node *node, enum delact act, 
                  size_t index, void *key,
-                 int (*compare)(const void *a, const void *b), void *prev,
-                 uint64_t *hint, int depth)
+                 int (*compare)(const void *a, const void *b, void *udata), 
+                 void *prev, uint64_t *hint, int depth)
 {
     int i = 0;
     bool found = false;
@@ -1027,7 +1030,7 @@ static void sane_walk(const void *item, void *udata) {
         return;
     }
     if (ctx->last != NULL) {
-        if (ctx->btree->compare(ctx->last, item) >= 0) {
+        if (ctx->btree->compare(ctx->last, item, ctx->btree->udata) >= 0) {
             ctx->bad = true;
             return;
         }
@@ -1134,7 +1137,10 @@ static void shuffle(void *array, size_t numels, size_t elsize) {
     }
 }
 
-static int compare_ints(const void *a, const void *b) {
+static int compare_ints_nudata(const void *a, const void *b) {
+    return *(int*)a - *(int*)b;
+}
+static int compare_ints(const void *a, const void *b, void *udata) {
     return *(int*)a - *(int*)b;
 }
 
@@ -1153,12 +1159,12 @@ static bool iter(const void *item, void *udata) {
     }
     if (ctx->last) {
         if (ctx->rev) {
-            if (ctx->btree->compare(item, ctx->last) >= 0) {
+            if (ctx->btree->compare(item, ctx->last, ctx->btree->udata) >= 0) {
                 ctx->bad = true;
                 return false;
             }
         } else {
-            if (ctx->btree->compare(ctx->last, item) >= 0) {
+            if (ctx->btree->compare(ctx->last, item, ctx->btree->udata) >= 0) {
                 ctx->bad = true;
                 return false;
             }
@@ -1189,7 +1195,8 @@ static void all() {
     struct btree *btree = NULL;
     for (int h = 0; h < 2; h++) {
         if (btree) btree_free(btree);
-        while (!(btree = btree_new(sizeof(int), max_items, compare_ints))){}
+        while (!(btree = btree_new(sizeof(int), max_items, compare_ints, 
+                                   NULL))){}
 
         shuffle(vals, N, sizeof(int));
         uint64_t hint = 0;
@@ -1413,31 +1420,31 @@ static void benchmarks() {
     struct btree *btree;
     uint64_t hint = 0;
 
-    btree = btree_new(sizeof(int), max_items, compare_ints);
-    qsort(vals, N, sizeof(int), compare_ints);
+    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    qsort(vals, N, sizeof(int), compare_ints_nudata);
     bench("load (seq)", N, {
         btree_load(btree, &vals[i]);
     })
     btree_free(btree);
 
     shuffle(vals, N, sizeof(int));
-    btree = btree_new(sizeof(int), max_items, compare_ints);
+    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
     bench("load (rand)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
     btree_free(btree);
 
 
-    btree = btree_new(sizeof(int), max_items, compare_ints);
-    qsort(vals, N, sizeof(int), compare_ints);
+    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    qsort(vals, N, sizeof(int), compare_ints_nudata);
     bench("set (seq)", N, {
         btree_set(btree, &vals[i]);
     })
     btree_free(btree);
 
     ////
-    qsort(vals, N, sizeof(int), compare_ints);
-    btree = btree_new(sizeof(int), max_items, compare_ints);
+    qsort(vals, N, sizeof(int), compare_ints_nudata);
+    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
     bench("set (seq-hint)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
@@ -1445,13 +1452,13 @@ static void benchmarks() {
 
     ////
     shuffle(vals, N, sizeof(int));
-    btree = btree_new(sizeof(int), max_items, compare_ints);
+    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
     bench("set (rand)", N, {
         btree_set(btree, &vals[i]);
     })
     
 
-    qsort(vals, N, sizeof(int), compare_ints);
+    qsort(vals, N, sizeof(int), compare_ints_nudata);
     bench("get (seq)", N, {
         btree_get(btree, &vals[i]);
     })
