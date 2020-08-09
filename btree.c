@@ -272,6 +272,7 @@ struct btree *btree_new(size_t elsize, size_t max_items,
     btree->min_items = btree->max_items*40/100;
     btree->elsize = elsize;
     btree->spare = ((char*)btree)+sizeof(struct btree);
+    btree->udata = udata;
     return btree;
 }
 
@@ -1137,10 +1138,13 @@ static void shuffle(void *array, size_t numels, size_t elsize) {
     }
 }
 
+static char nothing[] = "nothing";
+
 static int compare_ints_nudata(const void *a, const void *b) {
     return *(int*)a - *(int*)b;
 }
 static int compare_ints(const void *a, const void *b, void *udata) {
+    assert(udata == nothing);
     return *(int*)a - *(int*)b;
 }
 
@@ -1196,7 +1200,7 @@ static void all() {
     for (int h = 0; h < 2; h++) {
         if (btree) btree_free(btree);
         while (!(btree = btree_new(sizeof(int), max_items, compare_ints, 
-                                   NULL))){}
+                                   nothing))){}
 
         shuffle(vals, N, sizeof(int));
         uint64_t hint = 0;
@@ -1420,7 +1424,7 @@ static void benchmarks() {
     struct btree *btree;
     uint64_t hint = 0;
 
-    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    btree = btree_new(sizeof(int), max_items, compare_ints, nothing);
     qsort(vals, N, sizeof(int), compare_ints_nudata);
     bench("load (seq)", N, {
         btree_load(btree, &vals[i]);
@@ -1428,14 +1432,14 @@ static void benchmarks() {
     btree_free(btree);
 
     shuffle(vals, N, sizeof(int));
-    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    btree = btree_new(sizeof(int), max_items, compare_ints, nothing);
     bench("load (rand)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
     btree_free(btree);
 
 
-    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    btree = btree_new(sizeof(int), max_items, compare_ints, nothing);
     qsort(vals, N, sizeof(int), compare_ints_nudata);
     bench("set (seq)", N, {
         btree_set(btree, &vals[i]);
@@ -1444,7 +1448,7 @@ static void benchmarks() {
 
     ////
     qsort(vals, N, sizeof(int), compare_ints_nudata);
-    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    btree = btree_new(sizeof(int), max_items, compare_ints, nothing);
     bench("set (seq-hint)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
@@ -1452,7 +1456,7 @@ static void benchmarks() {
 
     ////
     shuffle(vals, N, sizeof(int));
-    btree = btree_new(sizeof(int), max_items, compare_ints, NULL);
+    btree = btree_new(sizeof(int), max_items, compare_ints, nothing);
     bench("set (rand)", N, {
         btree_set(btree, &vals[i]);
     })
