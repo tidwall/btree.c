@@ -458,8 +458,9 @@ static void *btree_set_x(struct btree *btree, void *item, bool lean_left,
 }
 
 // btree_set inserts or replaces an item in the btree. If an item is replaced
-// then it is returned otherwise NULL is returned. This is the only btree
-// operation that allocates memory. If the system could not allocate the
+// then it is returned otherwise NULL is returned. 
+// The `btree_set`, `btree_set_hint`, and `btree_load` are the only btree 
+// operations that allocates memory. If the system could not allocate the
 // memory then NULL is returned and btree_oom() returns true.
 void *btree_set(struct btree *btree, void *item) {
     return btree_set_x(btree, item, false, NULL);
@@ -468,6 +469,9 @@ void *btree_set(struct btree *btree, void *item) {
 // btree_set_hint is the same as btree_set except that an optional "hint" can 
 // be provided which may make the operation quicker when done as a batch or 
 // in a userspace context.
+// The `btree_set`, `btree_set_hint`, and `btree_load` are the only btree 
+// operations that allocates memory. If the system could not allocate the
+// memory then NULL is returned and btree_oom() returns true.
 void *btree_set_hint(struct btree *btree, void *item, uint64_t *hint) {
     return btree_set_x(btree, item, false, hint);
 }
@@ -475,6 +479,9 @@ void *btree_set_hint(struct btree *btree, void *item, uint64_t *hint) {
 // btree_load is the same as btree_set but is optimized for sequential bulk 
 // loading. It can be up to 10x faster than btree_set when the items are
 // in exact order, but up to 25% slower when not in exact order.
+// The `btree_set`, `btree_set_hint`, and `btree_load` are the only btree 
+// operations that allocates memory. If the system could not allocate the
+// memory then NULL is returned and btree_oom() returns true.
 void *btree_load(struct btree *btree, void *item) {
     if (!item) {
         panic("item is null");
@@ -487,6 +494,7 @@ void *btree_load(struct btree *btree, void *item) {
         set_item_at(btree->elsize, btree->lnode, btree->lnode->num_items, item);
         btree->lnode->num_items++;
         btree->count++;
+        btree->oom = false;
         return NULL;
     }
     void *prev = btree_set_x(btree, item, true, NULL);
