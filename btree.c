@@ -151,7 +151,7 @@ static bool grow_group(struct group *group) {
 }
 
 static void takeaway(struct btree *btree, struct node *node) {
-    const int MAXLEN = 32;
+    const size_t MAXLEN = 32;
     struct group *group;
     if (node->leaf) {
         group = &btree->pool.leaves;
@@ -937,8 +937,8 @@ bool btree_oom(struct btree *btree) {
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Weverything"
 #endif
-
 #pragma GCC diagnostic ignored "-Wextra"
+
 
 static void node_walk(struct btree *btree, struct node *node, 
                       void (*fn)(const void *item, void *udata), void *udata) 
@@ -1110,7 +1110,8 @@ static bool slowget_at_iter(const void *item, void *udata) {
     return true;
 }
 
-static void *btree_slowget_at(struct btree *btree, size_t index) {
+void *btree_slowget_at(struct btree *btree, size_t index);
+void *btree_slowget_at(struct btree *btree, size_t index) {
     struct slowget_at_ctx ctx = { .btree = btree, .index = index };
     btree_ascend(btree, NULL, slowget_at_iter, &ctx);
     return ctx.result;
