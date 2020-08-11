@@ -37,8 +37,14 @@ void *btree_max(struct btree *btree);
 
 bool btree_ascend(struct btree *btree, void *pivot, 
                   bool (*iter)(const void *item, void *udata), void *udata);
+bool btree_ascend_hint(struct btree *btree, void *pivot, 
+                       bool (*iter)(const void *item, void *udata), 
+                       void *udata, uint64_t *hint);
 bool btree_descend(struct btree *btree, void *pivot, 
                    bool (*iter)(const void *item, void *udata), void *udata);
+bool btree_descend_hint(struct btree *btree, void *pivot, 
+                        bool (*iter)(const void *item, void *udata), 
+                        void *udata, uint64_t *hint);
 
 void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*));
 

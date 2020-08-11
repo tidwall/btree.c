@@ -151,7 +151,7 @@ static bool grow_group(struct group *group) {
 }
 
 static void takeaway(struct btree *btree, struct node *node) {
-    const int MAXLEN = 32;
+    const size_t MAXLEN = 32;
     struct group *group;
     if (node->leaf) {
         group = &btree->pool.leaves;
@@ -771,13 +771,15 @@ static bool node_scan(struct btree *btree, struct node *node,
 
 static bool node_ascend(struct btree *btree, struct node *node, void *pivot, 
                         bool (*iter)(const void *item, void *udata), 
-                        void *udata) 
+                        void *udata, uint64_t *hint) 
 {
     bool found;
-    int i = node_find(btree, node, pivot, &found, NULL, 0);
+    int i = node_find(btree, node, pivot, &found, hint, 0);
     if (!found) {
         if (!node->leaf) {
-            if (!node_ascend(btree, node->children[i], pivot, iter, udata)) {
+            if (!node_ascend(btree, node->children[i], pivot, iter, udata,
+                             hint)) 
+            {
                 return false;
             }
         }
@@ -823,13 +825,15 @@ static bool node_reverse(struct btree *btree, struct node *node,
 
 static bool node_descend(struct btree *btree, struct node *node, void *pivot, 
                         bool (*iter)(const void *item, void *udata), 
-                        void *udata) 
+                        void *udata, uint64_t *hint) 
 {
     bool found;
-    int i = node_find(btree, node, pivot, &found, NULL, 0);
+    int i = node_find(btree, node, pivot, &found, hint, 0);
     if (!found) {
         if (!node->leaf) {
-            if (!node_descend(btree, node->children[i], pivot, iter, udata)) {
+            if (!node_descend(btree, node->children[i], pivot, iter, udata, 
+                              hint)) 
+            {
                 return false;
             }
         }
@@ -848,6 +852,22 @@ static bool node_descend(struct btree *btree, struct node *node, void *pivot,
     return true;
 }
 
+// btree_ascend_hint is the same as btree_ascend except that an optional
+// "hint" can be provided which may make the operation quicker when done as a
+// batch or in a userspace context.
+bool btree_ascend_hint(struct btree *btree, void *pivot, 
+                       bool (*iter)(const void *item, void *udata), 
+                       void *udata, uint64_t *hint) 
+{
+    if (btree->root) {
+        if (!pivot) {
+            return node_scan(btree, btree->root, iter, udata);
+        }
+        return node_ascend(btree, btree->root, pivot, iter, udata, hint);
+    }
+    return true;
+}
+
 // Ascend the tree within the range [pivot, last]. In other words 
 // `btree_ascend()` iterates over all items that are greater-than-or-equal-to
 // pivot in ascending order.
@@ -857,11 +877,21 @@ static bool node_descend(struct btree *btree, struct node *node, void *pivot,
 bool btree_ascend(struct btree *btree, void *pivot, 
                   bool (*iter)(const void *item, void *udata), void *udata) 
 {
+    return btree_ascend_hint(btree, pivot, iter, udata, NULL);
+}
+
+// btree_descend_hint is the same as btree_descend except that an optional
+// "hint" can be provided which may make the operation quicker when done as a
+// batch or in a userspace context.
+bool btree_descend_hint(struct btree *btree, void *pivot, 
+                        bool (*iter)(const void *item, void *udata), 
+                        void *udata, uint64_t *hint) 
+{
     if (btree->root) {
         if (!pivot) {
-            return node_scan(btree, btree->root, iter, udata);
+            return node_reverse(btree, btree->root, iter, udata);
         }
-        return node_ascend(btree, btree->root, pivot, iter, udata);
+        return node_descend(btree, btree->root, pivot, iter, udata, hint);
     }
     return true;
 }
@@ -875,15 +905,8 @@ bool btree_ascend(struct btree *btree, void *pivot,
 bool btree_descend(struct btree *btree, void *pivot, 
                    bool (*iter)(const void *item, void *udata), void *udata) 
 {
-    if (btree->root) {
-        if (!pivot) {
-            return node_reverse(btree, btree->root, iter, udata);
-        }
-        return node_descend(btree, btree->root, pivot, iter, udata);
-    }
-    return true;
+    return btree_descend_hint(btree, pivot, iter, udata, NULL);
 }
-
 ////////////////////////////////////////////////////////////////////////////////
 
 static void node_print(struct btree *btree, struct node *node, 
@@ -937,8 +960,8 @@ bool btree_oom(struct btree *btree) {
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Weverything"
 #endif
-
 #pragma GCC diagnostic ignored "-Wextra"
+
 
 static void node_walk(struct btree *btree, struct node *node, 
                       void (*fn)(const void *item, void *udata), void *udata) 
@@ -1110,7 +1133,8 @@ static bool slowget_at_iter(const void *item, void *udata) {
     return true;
 }
 
-static void *btree_slowget_at(struct btree *btree, size_t index) {
+void *btree_slowget_at(struct btree *btree, size_t index);
+void *btree_slowget_at(struct btree *btree, size_t index) {
     struct slowget_at_ctx ctx = { .btree = btree, .index = index };
     btree_ascend(btree, NULL, slowget_at_iter, &ctx);
     return ctx.result;
