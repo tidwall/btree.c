@@ -8,6 +8,11 @@
 #include <stdint.h>
 #include "btree.h"
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wpadded"
+#pragma clang diagnostic ignored "-Wvla"
+#endif
+
 static void *(*_malloc)(size_t) = NULL;
 static void (*_free)(void *) = NULL;
 
@@ -25,39 +30,39 @@ void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*)) {
 #define panic(_msg_) { \
     fprintf(stderr, "panic: %s (%s:%d)\n", (_msg_), __FILE__, __LINE__); \
     exit(1); \
-}
+}(void)(0)
 
 struct node {
     bool leaf;
     short num_items;
-    void *items;
+    char *items;
     struct node *children[];
 };
 
-static void *get_item_at(size_t elsz, struct node *node, int index) {
+static void *get_item_at(size_t elsz, struct node *node, size_t index) {
     return node->items+elsz*index;
 }
 
-static void set_item_at(size_t elsz, struct node *node, int index, 
+static void set_item_at(size_t elsz, struct node *node, size_t index, 
                         const void *item) 
 {
     memcpy(get_item_at(elsz, node, index), item, elsz);
 }
 
-static void copy_item_into(size_t elsz, struct node *node, int index, 
+static void copy_item_into(size_t elsz, struct node *node, size_t index, 
                            void *into)
 { 
     memcpy(into, get_item_at(elsz, node, index), elsz);
 }
 
-static void copy_item(size_t elsz, struct node *node_a, int index_a, 
-                                   struct node *node_b, int index_b) 
+static void copy_item(size_t elsz, struct node *node_a, size_t index_a, 
+                                   struct node *node_b, size_t index_b) 
 {
     memcpy(get_item_at(elsz, node_a, index_a), 
            get_item_at(elsz, node_b, index_b), elsz);
 }
 
-static void swap_item_at(size_t elsz, struct node *node, int index, 
+static void swap_item_at(size_t elsz, struct node *node, size_t index, 
                          const void *item, void *into)
 { 
     void *ptr = get_item_at(elsz, node, index);
@@ -67,7 +72,7 @@ static void swap_item_at(size_t elsz, struct node *node, int index,
 
 struct group {
     struct node **nodes;
-    int len, cap;
+    size_t len, cap;
 };
 
 struct pool {
@@ -83,9 +88,9 @@ struct btree {
     size_t count;
     struct pool pool;
     bool oom;
-    int height;
-    int max_items;
-    int min_items;
+    size_t height;
+    size_t max_items;
+    size_t min_items;
     size_t elsize;
     void *spare;        // holds the result of sets and deletes
     void *litem;        // last load item
@@ -133,7 +138,7 @@ static struct node *gimme_branch(struct btree *btree) {
 }
 
 static bool grow_group(struct group *group) {
-    int cap = group->cap?group->cap*2:1;
+    size_t cap = group->cap?group->cap*2:1;
     struct node **nodes = btmalloc(sizeof(struct node*)*cap);
     if (!nodes) {
         return false;
@@ -199,42 +204,42 @@ static bool fill_pool(struct btree *btree) {
 }
 
 static void node_join(size_t elsize, struct node *left, struct node *right) {
-    memcpy(left->items+elsize*left->num_items,
+    memcpy(left->items+elsize*(size_t)left->num_items,
            right->items,
-           right->num_items*elsize);
+           (size_t)right->num_items*elsize);
     if (!left->leaf) {
         memcpy(&left->children[left->num_items],
                &right->children[0],
-               (right->num_items+1)*sizeof(struct node*));
+               (size_t)(right->num_items+1)*sizeof(struct node*));
     }
     left->num_items += right->num_items;
 }
 
-static void node_shift_right(size_t elsize, struct node *node, int index) {
+static void node_shift_right(size_t elsize, struct node *node, size_t index) {
     memmove(node->items+elsize*(index+1), 
             node->items+elsize*index,
-            (node->num_items-index)*elsize);
+            ((size_t)node->num_items-index)*elsize);
     if (!node->leaf) {
         memmove(&node->children[index+1],
                 &node->children[index],
-                (node->num_items-index+1)*sizeof(struct node*));
+                ((size_t)node->num_items-index+1)*sizeof(struct node*));
     }
     node->num_items++;
 }
 
-static void node_shift_left(size_t elsize, struct node *node, int index, 
+static void node_shift_left(size_t elsize, struct node *node, size_t index, 
                             bool for_merge) 
 {
     memmove(node->items+elsize*index, 
             node->items+elsize*(index+1),
-            (node->num_items-index)*elsize);
+            ((size_t)node->num_items-index)*elsize);
     if (!node->leaf) {
         if (for_merge) {
             index++;
         }
         memmove(&node->children[index],
                 &node->children[index+1],
-                (node->num_items-index+1)*sizeof(struct node*));
+                ((size_t)node->num_items-index+1)*sizeof(struct node*));
     }
     node->num_items--;
 }
@@ -277,11 +282,11 @@ struct btree *btree_new(size_t elsize, size_t max_items,
 }
 
 static void release_pool(struct btree *btree) {
-    for (int i = 0; i < btree->pool.leaves.len; i++) {
+    for (size_t i = 0; i < btree->pool.leaves.len; i++) {
         btfree(btree->pool.leaves.nodes[i]);
     }
     btfree(btree->pool.leaves.nodes);
-    for (int i = 0; i < btree->pool.branches.len; i++) {
+    for (size_t i = 0; i < btree->pool.branches.len; i++) {
         btfree(btree->pool.branches.nodes[i]);
     }
     btfree(btree->pool.branches.nodes);
@@ -299,7 +304,7 @@ void btree_free(struct btree *btree) {
 }
 
 // btree_height returns the height of the btree.
-int btree_height(struct btree *btree) {
+size_t btree_height(struct btree *btree) {
     return btree->height;
 }
 
@@ -316,28 +321,28 @@ static void node_split(struct btree *btree, struct node *node,
         // Split so the left node has as many items as possible, leaving the
         // new right with the minimum items. This makes more space available to
         // the right node for sequential inserts and bulk loading.
-        mid = btree->max_items-1-btree->min_items;
-        int mdif = (node->num_items-(mid+1))-btree->min_items;
+        mid = (int)(btree->max_items-1-btree->min_items);
+        int mdif = (node->num_items-(mid+1))-(int)btree->min_items;
         if (mdif < 0) {
             mid += mdif;
         }
     } else {
         // split so that both left and right have the same number of items.
-        mid = (btree->max_items-1)/2;
+        mid = (int)(btree->max_items-1)/2;
     }
-    *median = get_item_at(btree->elsize, node, mid);    
+    *median = get_item_at(btree->elsize, node, (size_t)mid);    
     *right = node->leaf ? gimme_leaf(btree) : gimme_branch(btree);
     (*right)->leaf = node->leaf;
-    (*right)->num_items = node->num_items-(mid+1);
+    (*right)->num_items = node->num_items-((short)mid+1);
     memmove((*right)->items,
-            node->items+btree->elsize*(mid+1),
-            (*right)->num_items*btree->elsize);
+            node->items+(int)btree->elsize*(mid+1),
+            (*right)->num_items*(int)btree->elsize);
     if (!node->leaf) {
         for (int i = 0; i <= (*right)->num_items; i++) {
             (*right)->children[i] = node->children[mid+1+i];
         }
     }
-    node->num_items = mid;
+    node->num_items = (short)mid;
 }
 
 static int node_find(struct btree *btree, struct node *node, void *key, 
@@ -351,7 +356,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
             if (index > node->num_items-1) {
                 index = node->num_items-1;
             }
-            void *item = get_item_at(btree->elsize, node, index);
+            void *item = get_item_at(btree->elsize, node, (size_t)index);
             int cmp = btree->compare(key, item, btree->udata);
             if (cmp == 0) {
                 *found = true;
@@ -367,7 +372,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
     int index;
     while ( low <= high ) {
         int mid = (low + high) / 2;
-        void *item = get_item_at(btree->elsize, node, mid);
+        void *item = get_item_at(btree->elsize, node, (size_t)mid);
         int cmp = btree->compare(key, item, btree->udata);
         if (cmp == 0) {
             *found = true;
@@ -384,7 +389,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
     index = low;
 done:
     if (hint && depth < 8) {
-        ((uint8_t*)hint)[depth] = index;
+        ((uint8_t*)hint)[depth] = (uint8_t)index;
     }
     return index;
 }
@@ -395,23 +400,23 @@ static bool node_set(struct btree *btree, struct node *node, void *item,
     bool found = false;
     int i = node_find(btree, node, item, &found, hint, depth);
     if (found) {
-        swap_item_at(btree->elsize, node, i, item, btree->spare);
+        swap_item_at(btree->elsize, node, (size_t)i, item, btree->spare);
         return true;
     }
     if (node->leaf) {
-        node_shift_right(btree->elsize, node, i);
-        set_item_at(btree->elsize, node, i, item);
+        node_shift_right(btree->elsize, node, (size_t)i);
+        set_item_at(btree->elsize, node, (size_t)i, item);
         return false;
     }
     if (node_set(btree, node->children[i], item, lean_left, hint, depth+1)) {
         return true;
     }
-    if (node->children[i]->num_items == (btree->max_items-1)) {
+    if ((size_t)node->children[i]->num_items == (btree->max_items-1)) {
         void *median = NULL;
         struct node *right = NULL;
         node_split(btree, node->children[i], &right, &median, lean_left);
-        node_shift_right(btree->elsize, node, i);
-        set_item_at(btree->elsize, node, i, median);
+        node_shift_right(btree->elsize, node, (size_t)i);
+        set_item_at(btree->elsize, node, (size_t)i, median);
         node->children[i+1] = right;
     }
     return false;
@@ -437,12 +442,12 @@ static void *btree_set_x(struct btree *btree, void *item, bool lean_left,
         btree->count++;
         btree->height++;
         return NULL;
-    };
+    }
     if (node_set(btree, btree->root, item, lean_left, hint, 0)) {
         return btree->spare;
     }
     btree->count++;
-    if (btree->root->num_items == (btree->max_items-1)) {
+    if ((size_t)btree->root->num_items == (btree->max_items-1)) {
         void *old_root = btree->root;
         struct node *right = NULL;
         void *median = NULL;
@@ -488,10 +493,11 @@ void *btree_load(struct btree *btree, void *item) {
     }
     if (btree->litem && 
         btree->lnode && 
-        btree->lnode->num_items < btree->max_items-2 &&
+        (size_t)btree->lnode->num_items < btree->max_items-2 &&
         btree->compare(item, btree->litem, btree->udata) > 0)
     {
-        set_item_at(btree->elsize, btree->lnode, btree->lnode->num_items, item);
+        set_item_at(btree->elsize, btree->lnode, 
+                    (size_t)btree->lnode->num_items, item);
         btree->lnode->num_items++;
         btree->count++;
         btree->oom = false;
@@ -505,7 +511,8 @@ void *btree_load(struct btree *btree, void *item) {
     for (;;) {
         if (node->leaf) {
             btree->lnode = node;
-            btree->litem = get_item_at(btree->elsize, node, node->num_items-1);
+            btree->litem = get_item_at(btree->elsize, node, 
+                                       (size_t)(node->num_items-1));
             break;
         }
         node = node->children[node->num_items];
@@ -526,7 +533,7 @@ void *btree_get_hint(struct btree *btree, void *key, uint64_t *hint) {
         bool found = false;
         int i = node_find(btree, node, key, &found, hint, depth);
         if (found) {
-            return get_item_at(elsz, node, i);
+            return get_item_at(elsz, node, (size_t)i);
         }
         if (node->leaf) {
             return NULL;
@@ -545,10 +552,11 @@ enum delact {
     DELKEY, POPFRONT, POPBACK, POPMAX,
 };
 
-bool node_delete(struct btree *btree, struct node *node, enum delact act, 
-                 size_t index, void *key,
-                 int (*compare)(const void *a, const void *b, void *udata), 
-                 void *prev, uint64_t *hint, int depth)
+static bool node_delete(struct btree *btree, struct node *node, enum delact act, 
+                        size_t index, void *key,
+                        int (*compare)(const void *a, const void *b, 
+                                       void *udata), 
+                        void *prev, uint64_t *hint, int depth)
 {
     int i = 0;
     bool found = false;
@@ -577,8 +585,8 @@ bool node_delete(struct btree *btree, struct node *node, enum delact act,
     if (node->leaf) {
         if (found) {
             // item was found in leaf, copy its contents and delete it.
-            copy_item_into(btree->elsize, node, i, prev);
-            node_shift_left(btree->elsize, node, i, false);
+            copy_item_into(btree->elsize, node, (size_t)i, prev);
+            node_shift_left(btree->elsize, node, (size_t)i, false);
             return true;
         }
         return false;
@@ -596,11 +604,11 @@ bool node_delete(struct btree *btree, struct node *node, enum delact act,
         } else {
             // item was found in branch, copy its contents, delete it, and 
             // begin popping off the max items in child nodes.
-            copy_item_into(btree->elsize, node, i, prev);
-            char tmp_item[btree->elsize];
+            copy_item_into(btree->elsize, node, (size_t)i, prev);
+            char tmp_item[btree->elsize]; // VLA
             node_delete(btree, node->children[i], POPMAX, 0, NULL, NULL, 
                         tmp_item, hint, depth+1);
-            set_item_at(btree->elsize, node, i, tmp_item);
+            set_item_at(btree->elsize, node, (size_t)i, tmp_item);
             deleted = true;
         }
     } else {
@@ -612,7 +620,7 @@ bool node_delete(struct btree *btree, struct node *node, enum delact act,
         return false;
     }
     
-    if (node->children[i]->num_items >= btree->min_items) {
+    if ((size_t)node->children[i]->num_items >= btree->min_items) {
         return true;
     }
     
@@ -623,33 +631,37 @@ bool node_delete(struct btree *btree, struct node *node, enum delact act,
     struct node *left = node->children[i];
     struct node *right = node->children[i+1];
 
-    if (left->num_items + right->num_items + 1 < (btree->max_items-1)) {
+    if ((size_t)(left->num_items + right->num_items + 1) < 
+        (btree->max_items-1)) 
+    {
         // merge left + item + right
-        copy_item(btree->elsize, left, left->num_items, node, i);
+        copy_item(btree->elsize, left, (size_t)left->num_items, node, 
+                  (size_t)i);
         left->num_items++;
         node_join(btree->elsize, left, right);
         takeaway(btree, right);
-        node_shift_left(btree->elsize, node, i, true);
+        node_shift_left(btree->elsize, node, (size_t)i, true);
     } else if (left->num_items > right->num_items) {
         // move left -> right
         node_shift_right(btree->elsize, right, 0);
-        copy_item(btree->elsize, right, 0, node, i);
+        copy_item(btree->elsize, right, 0, node, (size_t)i);
         if (!left->leaf) {
             right->children[0] = left->children[left->num_items];
         }
-        copy_item(btree->elsize, node, i, left, left->num_items-1);
+        copy_item(btree->elsize, node, (size_t)i, left, 
+                  (size_t)(left->num_items-1));
         if (!left->leaf) {
             left->children[left->num_items] = NULL;
         }
         left->num_items--;
     } else {
         // move right -> left
-        copy_item(btree->elsize, left, left->num_items, node, i);
+        copy_item(btree->elsize, left, (size_t)left->num_items, node, (size_t)i);
         if (!left->leaf) {
             left->children[left->num_items+1] = right->children[0];
         }
         left->num_items++;
-        copy_item(btree->elsize, node, i, right, 0);
+        copy_item(btree->elsize, node, (size_t)i, right, 0);
         node_shift_left(btree->elsize, right, 0, false);
     }
     return deleted;
@@ -726,7 +738,8 @@ void *btree_max(struct btree *btree) {
     }    
     for (;;) {
         if (node->leaf) {
-            return get_item_at(btree->elsize, node, node->num_items-1);
+            return get_item_at(btree->elsize, node, 
+                               (size_t)(node->num_items-1));
         }
         node = node->children[node->num_items];
     }
@@ -739,7 +752,7 @@ static bool node_scan(struct btree *btree, struct node *node,
 {
     if (node->leaf) {
         for (int i = 0; i < node->num_items; i++) {
-            if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+            if (!iter(get_item_at(btree->elsize, node, (size_t)i), udata)) {
                 return false;
             }
         }
@@ -749,7 +762,7 @@ static bool node_scan(struct btree *btree, struct node *node,
         if (!node_scan(btree, node->children[i], iter, udata)) {
             return false;
         }
-        if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+        if (!iter(get_item_at(btree->elsize, node, (size_t)i), udata)) {
             return false;
         }
     }
@@ -770,7 +783,7 @@ static bool node_ascend(struct btree *btree, struct node *node, void *pivot,
         }
     }
     for (; i < node->num_items; i++) {
-        if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+        if (!iter(get_item_at(btree->elsize, node, (size_t)i), udata)) {
             return false;
         }
         if (!node->leaf) {
@@ -788,7 +801,7 @@ static bool node_reverse(struct btree *btree, struct node *node,
 {
     if (node->leaf) {
 		for (int i = node->num_items - 1; i >= 0; i--) {
-			if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+			if (!iter(get_item_at(btree->elsize, node, (size_t)i), udata)) {
 				return false;
 			}
 		}
@@ -798,7 +811,7 @@ static bool node_reverse(struct btree *btree, struct node *node,
 		return false;
 	}
 	for (int i = node->num_items - 1; i >= 0; i--) {
-		if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+		if (!iter(get_item_at(btree->elsize, node, (size_t)i), udata)) {
 			return false;
 		}
         if (!node_reverse(btree, node->children[i], iter, udata)) {
@@ -823,7 +836,7 @@ static bool node_descend(struct btree *btree, struct node *node, void *pivot,
         i--;
     }
     for (; i >= 0; i--) {
-        if (!iter(get_item_at(btree->elsize, node, i), udata)) {
+        if (!iter(get_item_at(btree->elsize, node,(size_t)i), udata)) {
             return false;
         }
         if (!node->leaf) {
@@ -885,22 +898,23 @@ static void node_print(struct btree *btree, struct node *node,
             if (i > 0) {
                 printf(" ");
             }
-            print(get_item_at(btree->elsize, node, i));
+            print(get_item_at(btree->elsize, node, (size_t)i));
         }
         printf("]\n");
     } else {
-        for (int i = 0; i < node->num_items; i++) {
+        for (short i = 0; i < node->num_items; i++) {
             node_print(btree, node->children[i], print, depth+1);
-            for (int i = 0; i < depth; i++) {
+            for (int j = 0; j < depth; j++) {
                 printf("  ");
             }
-            print(get_item_at(btree->elsize, node, i));
+            print(get_item_at(btree->elsize, node, (size_t)i));
             printf("\n");
         }
         node_print(btree, node->children[node->num_items], print, depth+1);
     }
 }
 
+void btree_print(struct btree *btree, void (*print)(void *item));
 void btree_print(struct btree *btree, void (*print)(void *item)) {
     if (btree->root) {
         node_print(btree, btree->root, print, 0);
@@ -919,6 +933,10 @@ bool btree_oom(struct btree *btree) {
 // $ cc -DBTREE_TEST -O3 btree.c && BENCH=1 ./a.out  # run benchmarks
 //==============================================================================
 #ifdef BTREE_TEST
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Weverything"
+#endif
 
 #pragma GCC diagnostic ignored "-Wextra"
 

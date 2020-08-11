@@ -17,7 +17,7 @@ struct btree *btree_new(size_t elsize, size_t max_items,
                         void *udata);
 void btree_free(struct btree *btree);
 bool btree_oom(struct btree *btree);
-int btree_height(struct btree *btree);
+size_t btree_height(struct btree *btree);
 size_t btree_count(struct btree *btree);
 
 void *btree_set(struct btree *btree, void *item);
