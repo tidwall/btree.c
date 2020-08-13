@@ -907,6 +907,7 @@ bool btree_descend(struct btree *btree, void *pivot,
 {
     return btree_descend_hint(btree, pivot, iter, udata, NULL);
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static void node_print(struct btree *btree, struct node *node, 
@@ -1436,11 +1437,16 @@ static void all() {
     clock_t end = clock(); \
     double elapsed_secs = (double)(end - begin) / CLOCKS_PER_SEC; \
     double bytes_sec = (double)bytes/elapsed_secs; \
-    printf("%d ops in %.3f secs, %.0f ns/op, %.0f op/sec", \
-        N, elapsed_secs, \
-        elapsed_secs/(double)N*1e9, \
-        (double)N/elapsed_secs \
-    ); \
+    double ns_op = elapsed_secs/(double)N*1e9; \
+    if (ns_op < 10) { \
+        printf("%d ops in %.3f secs, %.1f ns/op, %.0f op/sec", \
+            N, elapsed_secs, ns_op, (double)N/elapsed_secs \
+        ); \
+    } else { \
+        printf("%d ops in %.3f secs, %.0f ns/op, %.0f op/sec", \
+            N, elapsed_secs, ns_op, (double)N/elapsed_secs \
+        ); \
+    } \
     if (bytes > 0) { \
         printf(", %.1f GB/sec", bytes_sec/1024/1024/1024); \
     } \
@@ -1454,6 +1460,10 @@ static void all() {
     } \
     printf("\n"); \
 }}
+
+bool simple_iter(const void *item, void *udata) {
+    return true;
+}
 
 static void benchmarks() {
     int seed = getenv("SEED")?atoi(getenv("SEED")):time(NULL);
@@ -1544,6 +1554,14 @@ static void benchmarks() {
         assert(btree_max(btree));
     })
 
+    bench("ascend", N, {
+        btree_ascend(btree, NULL, simple_iter, NULL);
+        break;
+    })
+    bench("descend", N, {
+        btree_descend(btree, NULL, simple_iter, NULL);
+        break;
+    })
 
     bench("pop-min", N, {
         btree_pop_min(btree);
