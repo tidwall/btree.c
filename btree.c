@@ -771,14 +771,14 @@ static bool node_scan(struct btree *btree, struct node *node,
 
 static bool node_ascend(struct btree *btree, struct node *node, void *pivot, 
                         bool (*iter)(const void *item, void *udata), 
-                        void *udata, uint64_t *hint) 
+                        void *udata, uint64_t *hint, int depth) 
 {
     bool found;
-    int i = node_find(btree, node, pivot, &found, hint, 0);
+    int i = node_find(btree, node, pivot, &found, hint, depth);
     if (!found) {
         if (!node->leaf) {
             if (!node_ascend(btree, node->children[i], pivot, iter, udata,
-                             hint)) 
+                             hint, depth+1)) 
             {
                 return false;
             }
@@ -825,14 +825,14 @@ static bool node_reverse(struct btree *btree, struct node *node,
 
 static bool node_descend(struct btree *btree, struct node *node, void *pivot, 
                         bool (*iter)(const void *item, void *udata), 
-                        void *udata, uint64_t *hint) 
+                        void *udata, uint64_t *hint, int depth) 
 {
     bool found;
-    int i = node_find(btree, node, pivot, &found, hint, 0);
+    int i = node_find(btree, node, pivot, &found, hint, depth);
     if (!found) {
         if (!node->leaf) {
             if (!node_descend(btree, node->children[i], pivot, iter, udata, 
-                              hint)) 
+                              hint, depth+1)) 
             {
                 return false;
             }
@@ -863,7 +863,7 @@ bool btree_ascend_hint(struct btree *btree, void *pivot,
         if (!pivot) {
             return node_scan(btree, btree->root, iter, udata);
         }
-        return node_ascend(btree, btree->root, pivot, iter, udata, hint);
+        return node_ascend(btree, btree->root, pivot, iter, udata, hint, 0);
     }
     return true;
 }
@@ -891,7 +891,7 @@ bool btree_descend_hint(struct btree *btree, void *pivot,
         if (!pivot) {
             return node_reverse(btree, btree->root, iter, udata);
         }
-        return node_descend(btree, btree->root, pivot, iter, udata, hint);
+        return node_descend(btree, btree->root, pivot, iter, udata, hint, 0);
     }
     return true;
 }
