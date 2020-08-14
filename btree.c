@@ -92,7 +92,8 @@ struct btree {
     size_t max_items;
     size_t min_items;
     size_t elsize;
-    void *spare;        // holds the result of sets and deletes
+    void *spare1;       // holds the result of sets and deletes, etc.
+    void *spare2;       // holds the result of sets and deletes, etc.
     void *litem;        // last load item
     struct node *lnode; // last load node
 };
@@ -266,17 +267,27 @@ struct btree *btree_new(size_t elsize, size_t max_items,
     }
     if (elsize == 0) panic("elsize is zero");
     if (compare == NULL) panic("compare is null");
-    size_t sz = sizeof(struct btree)+elsize;
-    struct btree *btree = btmalloc(sz);
+    struct btree *btree = btmalloc(sizeof(struct btree));
     if (!btree) {
         return NULL;
     }
     memset(btree, 0, sizeof(struct btree));
+    btree->spare1 = btmalloc(elsize);
+    btree->spare2 = btmalloc(elsize);
+    if (!btree->spare1 || !btree->spare2) {
+        if (btree->spare1) {
+            btfree(btree->spare1);
+        }
+        if (btree->spare2) {
+            btfree(btree->spare2);
+        }
+        btfree(btree);
+        return NULL;
+    }
     btree->compare = compare;
     btree->max_items = max_items;
     btree->min_items = btree->max_items*40/100;
     btree->elsize = elsize;
-    btree->spare = ((char*)btree)+sizeof(struct btree);
     btree->udata = udata;
     return btree;
 }
@@ -300,7 +311,14 @@ void btree_free(struct btree *btree) {
         node_free(btree->root);
     }
     release_pool(btree);
+    btfree(btree->spare1);
+    btfree(btree->spare2);
     btfree(btree);
+}
+
+static void reset_load_fields(struct btree *btree) {
+    btree->litem = NULL;
+    btree->lnode = NULL;
 }
 
 // btree_height returns the height of the btree.
@@ -336,7 +354,7 @@ static void node_split(struct btree *btree, struct node *node,
     (*right)->num_items = node->num_items-((short)mid+1);
     memmove((*right)->items,
             node->items+(int)btree->elsize*(mid+1),
-            (*right)->num_items*(int)btree->elsize);
+            (size_t)(*right)->num_items*btree->elsize);
     if (!node->leaf) {
         for (int i = 0; i <= (*right)->num_items; i++) {
             (*right)->children[i] = node->children[mid+1+i];
@@ -400,7 +418,7 @@ static bool node_set(struct btree *btree, struct node *node, void *item,
     bool found = false;
     int i = node_find(btree, node, item, &found, hint, depth);
     if (found) {
-        swap_item_at(btree->elsize, node, (size_t)i, item, btree->spare);
+        swap_item_at(btree->elsize, node, (size_t)i, item, btree->spare1);
         return true;
     }
     if (node->leaf) {
@@ -425,11 +443,12 @@ static bool node_set(struct btree *btree, struct node *node, void *item,
 static void *btree_set_x(struct btree *btree, void *item, bool lean_left,
                          uint64_t *hint)
 {
+    reset_load_fields(btree);
+
     if (!item) {
         panic("item is null");
     }
-    btree->litem = NULL;
-    btree->lnode = NULL;
+
     btree->oom = false;
     if (!fill_pool(btree)) {
         btree->oom = true;
@@ -444,7 +463,7 @@ static void *btree_set_x(struct btree *btree, void *item, bool lean_left,
         return NULL;
     }
     if (node_set(btree, btree->root, item, lean_left, hint, 0)) {
-        return btree->spare;
+        return btree->spare1;
     }
     btree->count++;
     if ((size_t)btree->root->num_items == (btree->max_items-1)) {
@@ -670,11 +689,13 @@ static bool node_delete(struct btree *btree, struct node *node, enum delact act,
 static void *delete_x(struct btree *btree, enum delact act, size_t index, 
                       void *key, uint64_t *hint) 
 {
+    reset_load_fields(btree);
+    
     if (!btree->root) {
         return NULL;
     }
     bool deleted = node_delete(btree, btree->root, act, index, key, 
-                               btree->compare, btree->spare, hint, 0);
+                               btree->compare, btree->spare1, hint, 0);
     if (!deleted) {
         return NULL;
     }
@@ -689,7 +710,7 @@ static void *delete_x(struct btree *btree, enum delact act, size_t index,
         btree->height--;
     }
     btree->count--;
-    return btree->spare;
+    return btree->spare1;
 }
 
 // btree_delete_hint is the same as btree_delete except that an optional "hint"
@@ -908,6 +929,223 @@ bool btree_descend(struct btree *btree, void *pivot,
     return btree_descend_hint(btree, pivot, iter, udata, NULL);
 }
 
+#define BTSTOP      0
+#define BTCONTINUE  1
+#define BTSTARTOVER 2
+
+static int node_action_ascend(struct btree *btree, struct node *node, 
+                              void **pivot,
+                              enum btree_action (*iter)(void *item, 
+                                                        void *udata),
+                              void *udata, uint64_t *hint, int depth)
+{
+    bool found = false;
+    int i = 0;
+    if (*pivot) {
+        i = node_find(btree, node, *pivot, &found, hint, depth);
+    }
+    for (; i < node->num_items; i++) {
+        if (!node->leaf) {
+            int ret = node_action_ascend(btree, node->children[i], pivot, iter, 
+                                         udata, hint, depth+1);
+            if (ret != BTCONTINUE) {
+                return ret;
+            }
+        }
+        copy_item_into(btree->elsize, node, (size_t)i, btree->spare1);
+        switch (iter(btree->spare1, udata)) {
+        case BTREE_NONE:
+            break;;
+        case BTREE_DELETE:
+            if (node->leaf && (size_t)node->num_items > btree->min_items) {
+                // delete in place
+                node_shift_left(btree->elsize, node, (size_t)i, false);
+                btree->count--;
+                i--;
+                break;
+            } else {
+                // rebalancing is required, go the slow route
+                copy_item_into(btree->elsize, node, (size_t)i, btree->spare2);
+                btree_delete(btree, btree->spare2);
+                *pivot = btree->spare2;
+                return BTSTARTOVER;
+            }
+        case BTREE_UPDATE: {
+            void *item = get_item_at(btree->elsize, node, (size_t)i);
+            if (btree->compare(item, btree->spare1, btree->udata)) {
+                // Item keys have diverged. This is not fatal, but we need to
+                // retry the operation until we get the response we're looking
+                // for. There is a risk that a user, who does not understand
+                // that the updated item must match exactly with the previous
+                // item (ie "compare(a, b) == 0") , might create an infinite
+                // loop like scenario.
+                i--;
+            } else {
+                // Item keys match, update memory and move on.
+                set_item_at(btree->elsize, node, (size_t)i, btree->spare1);
+            }
+            break;
+        }
+        case BTREE_STOP:
+            return BTSTOP;
+        }
+    }
+    if (!node->leaf) {
+        int ret = node_action_ascend(btree, node->children[i], pivot, iter, 
+                                     udata, hint, depth+1);
+        if (ret != BTCONTINUE) {
+            return ret;
+        }
+    }
+    return BTCONTINUE;
+}
+
+static int node_action_descend(struct btree *btree, struct node *node, 
+                               void **pivot,
+                               enum btree_action (*iter)(void *item, 
+                                                         void *udata),
+                               void *udata, uint64_t *hint, int depth)
+{
+    bool found = false;
+    int i = node->num_items;
+    if (*pivot) {
+        i = node_find(btree, node, *pivot, &found, hint, depth);
+    }
+    if (!node->leaf && !found) {
+        int ret = node_action_descend(btree, node->children[i], pivot, iter,
+                                        udata, hint, depth+1);
+        if (ret != BTCONTINUE) {
+            return ret;
+        }
+    }
+    if (!found) {
+        i--;
+    }
+    for (;i >= 0;i--) {
+        copy_item_into(btree->elsize, node, (size_t)i, btree->spare1);
+        switch (iter(btree->spare1, udata)) {
+        case BTREE_NONE:
+            break;
+        case BTREE_DELETE:
+            if (node->leaf && (size_t)node->num_items > btree->min_items) {
+                // delete in place
+                node_shift_left(btree->elsize, node, (size_t)i, false);
+                btree->count--;
+                // i++;
+                break;
+            } else {
+                // rebalancing is required, go the slow route
+                copy_item_into(btree->elsize, node, (size_t)i, btree->spare2);
+                btree_delete(btree, btree->spare2);
+                *pivot = btree->spare2;
+                return BTSTARTOVER;
+            }
+        case BTREE_UPDATE: {
+            void *item = get_item_at(btree->elsize, node, (size_t)i);
+            if (btree->compare(item, btree->spare1, btree->udata)) {
+                // Item keys have diverged. This is not fatal, but we need to
+                // retry the operation until we get the response we're looking
+                // for. There is a risk that a user, who does not understand
+                // that the updated item must match exactly with the previous
+                // item (ie "compare(a, b) == 0") , might create an infinite
+                // loop like scenario.
+                i++;
+            } else {
+                // Item keys match, update memory and move on.
+                set_item_at(btree->elsize, node, (size_t)i, btree->spare1);
+            }
+            break;
+        }
+        case BTREE_STOP:
+            return BTSTOP;
+        }
+        if (!node->leaf) {
+            int ret = node_action_descend(btree, node->children[i], pivot, iter, 
+                                          udata, hint, depth+1);
+            if (ret != BTCONTINUE) {
+                return ret;
+            }
+        }
+    }
+    return BTCONTINUE;
+}
+
+
+// btree_action_ascend_hint is the same as btree_action_ascend but accepts
+// and optional hint param.
+void btree_action_ascend_hint(struct btree *btree, void *pivot,
+                              enum btree_action (*iter)(void *item, 
+                                                        void *udata),
+                              void *udata, uint64_t *hint)
+{
+    reset_load_fields(btree);
+    while (btree->root) {
+        int ret = node_action_ascend(btree, btree->root, &pivot, iter, udata, 
+                                     hint, 0);
+        if (ret != BTSTARTOVER) {
+            break; 
+        }
+    }
+}
+
+// btree_action_ascend allows for making changes to items in the tree while
+// iterating. It work just like btree_ascend except that the iterator is 
+// passed an item that can be optionally updated or deleted.
+//
+// To update an item, just make a change to the item and return BTREE_UPDATE. 
+// It's very important to not change the key equivalency of the item. In other
+// words the original item and the new item must compare to zero using the 
+// comparator that was provided to btree_new(). Otherwise, the iterator will
+// ignore the change and try the same item again.
+//
+// To delete an item, just return BTREE_DELETED. 
+// Return BTREE_NOTHING to make no change to the item or return BTREE_STOP to
+// stop iterating.
+void btree_action_ascend(struct btree *btree, void *pivot,
+                         enum btree_action (*iter)(void *item, void *udata),
+                         void *udata)
+{
+    btree_action_ascend_hint(btree, pivot, iter, udata, NULL);
+}
+
+// btree_action_descend_hint is the same as btree_action_descend but accepts
+// and optional hint param.
+void btree_action_descend_hint(struct btree *btree, void *pivot,
+                               enum btree_action (*iter)(void *item, 
+                                                        void *udata),
+                               void *udata, uint64_t *hint)
+{
+    reset_load_fields(btree);
+    while (btree->root) {
+        int ret = node_action_descend(btree, btree->root, &pivot, iter, udata, 
+                                     hint, 0);
+        if (ret != BTSTARTOVER) {
+            break; 
+        }
+    }
+}
+
+// btree_action_descend allows for making changes to items in the tree while
+// iterating. It work just like btree_descend except that the iterator is 
+// passed an item that can be optionally updated or deleted.
+//
+// To update an item, just make a change to the item and return BTREE_UPDATE. 
+// It's very important to not change the key equivalency of the item. In other
+// words the original item and the new item must compare to zero using the 
+// comparator that was provided to btree_new(). Otherwise, the iterator will
+// ignore the change and try the same item again.
+//
+// To delete an item, just return BTREE_DELETED. 
+// Return BTREE_NOTHING to make no change to the item or return BTREE_STOP to
+// stop iterating.
+void btree_action_descend(struct btree *btree, void *pivot,
+                         enum btree_action (*iter)(void *item, void *udata),
+                         void *udata)
+{
+    btree_action_descend_hint(btree, pivot, iter, udata, NULL);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static void node_print(struct btree *btree, struct node *node, 
@@ -958,10 +1196,10 @@ bool btree_oom(struct btree *btree) {
 //==============================================================================
 #ifdef BTREE_TEST
 
-#ifdef __clang__
-#pragma clang diagnostic ignored "-Weverything"
-#endif
-#pragma GCC diagnostic ignored "-Wextra"
+// #ifdef __clang__
+// #pragma clang diagnostic ignored "-Weverything"
+// #endif
+// #pragma GCC diagnostic ignored "-Wextra"
 
 
 static void node_walk(struct btree *btree, struct node *node, 
@@ -1230,15 +1468,284 @@ static bool iter(const void *item, void *udata) {
     return true;
 }
 
-static void all() {
+struct pair {
+    int key;
+    int val;
+};
+
+static int compare_pairs_nudata(const void *a, const void *b) {
+    return ((struct pair*)a)->key - ((struct pair*)b)->key;
+}
+
+static int compare_pairs(const void *a, const void *b, void *udata) {
+    assert(udata == nothing);
+    return ((struct pair*)a)->key - ((struct pair*)b)->key;
+}
+
+struct pair_keep_ctx {
+    struct pair last;
+    int count;
+};
+
+enum btree_action pair_keep(void *item, void *udata) {
+    struct pair_keep_ctx *ctx = udata;
+    if (ctx->count > 0) {
+        assert(compare_pairs_nudata(item, &ctx->last) > 0);
+    }
+    memcpy(&ctx->last, item, sizeof(struct pair));
+    ctx->count++;
+    return BTREE_NONE;
+}
+
+enum btree_action pair_keep_desc(void *item, void *udata) {
+    struct pair_keep_ctx *ctx = udata;
+    // struct pair *pair = (struct pair *)item;
+    // if (ctx->count == 0) {
+    //     printf("((%d))\n", pair->key);
+    // }
+    
+    if (ctx->count > 0) {
+        assert(compare_pairs_nudata(item, &ctx->last) < 0);
+    }
+    memcpy(&ctx->last, item, sizeof(struct pair));
+    ctx->count++;
+    return BTREE_NONE;
+}
+
+
+enum btree_action pair_update(void *item, void *udata) {
+    ((struct pair*)item)->val++;
+    return BTREE_UPDATE;
+}
+
+bool pair_update_check(const void *item, void *udata) {
+    int half = *(int*)udata;
+    struct pair *pair = (struct pair *)item;
+    if (pair->key < half) {
+        assert(pair->val == pair->key + 1);
+    } else {
+        assert(pair->val == pair->key + 2);
+    }
+    return true;
+}
+
+bool pair_update_check_desc(const void *item, void *udata) {
+    int half = *(int*)udata;
+    struct pair *pair = (struct pair *)item;
+    if (pair->key > half) {
+        assert(pair->val == pair->key + 1);
+    } else {
+        assert(pair->val == pair->key + 2);
+    }
+    return true;
+}
+
+enum btree_action pair_delete(void *item, void *udata) {
+    return BTREE_DELETE;
+}
+
+
+enum btree_action pair_cycle(void *item, void *udata) {
+    int i = *(int*)udata;
+    *(int*)udata = i+1;
+    switch (i % 3) {
+    case 0:
+        return BTREE_NONE;
+    case 1:
+        ((struct pair*)item)->val++;
+        return BTREE_UPDATE;
+    case 2:
+        return BTREE_DELETE;
+    }
+    panic("!");
+}
+
+const int def_MAX_ITEMS = 6;
+const int def_N = 5000;
+
+
+static void test_action_ascend() {
+    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):def_MAX_ITEMS;
+    int N = getenv("N")?atoi(getenv("N")):def_N;
+    
+    rand_alloc_fail = false;
+    assert(total_allocs == 0);
+
+    struct pair *pairs = xmalloc(sizeof(struct pair) * N);
+    for (int i = 0; i < N; i++) {
+        pairs[i].key = i;
+        pairs[i].val = i;
+    }
+
+    // qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    
+    struct btree *btree = btree_new(sizeof(struct pair), max_items, 
+                                    compare_pairs, nothing);
+
+    printf("== testing action ascend\n");
+    shuffle(pairs, N, sizeof(struct pair));
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &pairs[i]);
+    }
+    // test that all items exist and are in order, BTREE_NONE
+    struct pair_keep_ctx ctx = { 0 };
+    btree_action_ascend(btree, NULL, pair_keep, &ctx);
+    assert(ctx.count == N);
+    assert(btree_sane(btree));
+
+    // test items exist at various pivot points and are in order, BTREE_NONE
+    qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    for (int i = 2 ; i < 16; i++) {
+        memset(&ctx, 0, sizeof(struct pair_keep_ctx));
+        btree_action_ascend(btree, &pairs[N/i], pair_keep, &ctx);
+        assert(ctx.count == N-N/i);
+        assert(btree_sane(btree));
+    }
+
+    // update all item values, BTREE_UPDATE
+    btree_action_ascend(btree, NULL, pair_update, NULL);
+    btree_action_ascend(btree, &pairs[N/2], pair_update, NULL);
+    int half = N/2;
+    btree_ascend(btree, NULL, pair_update_check, &half);
+    assert(btree_sane(btree));
+
+    // delete all items, BTREE_DELETE
+    btree_action_ascend(btree, NULL, pair_delete, NULL);
+    assert(btree_count(btree) == 0);
+    assert(btree_sane(btree));
+
+    // delete items at various pivot points, BTREE_DELETE
+    for (int i = 2 ; i < 16; i++) {
+        qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+        for (int i = 0; i < N; i++) {
+            btree_set(btree, &pairs[i]);
+        }
+        assert(btree_count(btree) == N);
+        btree_action_ascend(btree, &pairs[N/i], pair_delete, NULL);
+        assert(btree_count(btree) == N/i);
+        assert(btree_sane(btree));
+    }
+
+
+    qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &pairs[i]);
+    }
+
+    // cycle the BTREE_NONE, BTREE_UPDATE, BTREE_DELETE
+    int cycle = 0;
+    btree_action_ascend(btree, NULL, pair_cycle, &cycle);
+    assert(btree_count(btree) == N-N/3);
+    assert(btree_sane(btree));
+    for (int i = 0; i < N; i++) {
+        struct pair *pair = btree_get(btree, &pairs[i]);
+        switch (i % 3) {
+        case 0:
+            assert(pair && pair->key == pair->val);
+            break;
+        case 1:
+            assert(pair && pair->key == pair->val-1);
+            break;
+        case 2:
+            assert(!pair);
+            break;            
+        }
+    }
+
+    printf("== testing action descend\n");
+    // do the same stuff as the ascend test, but in reverse
+    qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &pairs[i]);
+    }
+
+    // test that all items exist and are in order, BTREE_NONE
+    memset(&ctx, 0, sizeof(struct pair_keep_ctx));
+    // printf(">>%d<<\n", pairs[N/2].key);
+    btree_action_descend(btree, NULL, pair_keep_desc, &ctx);
+    assert(ctx.count == N);
+    assert(btree_sane(btree));
+
+    // test items exist at various pivot points and are in order, BTREE_NONE
+    qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    for (int i = 2 ; i < 16; i++) {
+        memset(&ctx, 0, sizeof(struct pair_keep_ctx));
+        btree_action_descend(btree, &pairs[N/i], pair_keep_desc, &ctx);
+        assert(ctx.count == N/i+1);
+        assert(btree_sane(btree));
+    }
+
+    // update all item values, BTREE_UPDATE
+    btree_action_descend(btree, NULL, pair_update, NULL);
+    btree_action_descend(btree, &pairs[N/2], pair_update, NULL);
+    half = N/2;
+    btree_descend(btree, NULL, pair_update_check_desc, &half);
+    assert(btree_sane(btree));
+
+    // delete all items, BTREE_DELETE
+    btree_action_descend(btree, NULL, pair_delete, NULL);
+    assert(btree_count(btree) == 0);
+    assert(btree_sane(btree));
+
+    // delete items at various pivot points, BTREE_DELETE
+    for (int i = 2 ; i < 16; i++) {
+        qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+        for (int i = 0; i < N; i++) {
+            btree_set(btree, &pairs[i]);
+        }
+        assert(btree_count(btree) == N);
+        btree_action_descend(btree, &pairs[N/i], pair_delete, NULL);
+        assert(btree_count(btree) == N-(N/i+1));
+        assert(btree_sane(btree));
+    }
+
+    qsort(pairs, N, sizeof(struct pair), compare_pairs_nudata);
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &pairs[i]);
+    }
+
+    // cycle the BTREE_NONE, BTREE_UPDATE, BTREE_DELETE
+    cycle = 0;
+    btree_action_descend(btree, NULL, pair_cycle, &cycle);
+    assert(btree_count(btree) == N-N/3);
+    assert(btree_sane(btree));
+    for (int i = N-1, j = 0; i >= 0; i--, j++) {
+        struct pair *pair = btree_get(btree, &pairs[i]);
+        switch (j % 3) {
+        case 0:
+            assert(pair && pair->key == pair->val);
+            break;
+        case 1:
+            assert(pair && pair->key == pair->val-1);
+            break;
+        case 2:
+            assert(!pair);
+            break;            
+        }
+    }
+
+    xfree(pairs);
+    btree_free(btree);
+
+    if (total_allocs != 0) {
+        fprintf(stderr, "total_allocs: expected 0, got %lu\n", total_allocs);
+        exit(1);
+    }
+}
+
+static void test_basic() {
     int seed = getenv("SEED")?atoi(getenv("SEED")):time(NULL);
-    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):6;
-    int N = getenv("N")?atoi(getenv("N")):2000;
+    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):def_MAX_ITEMS;
+    int N = getenv("N")?atoi(getenv("N")):def_N;
     printf("seed=%d, max_items=%d, count=%d, item_size=%zu\n", 
         seed, max_items, N, sizeof(int));
     srand(seed);
 
+    assert(total_allocs == 0);
     rand_alloc_fail = true;
+
+
+    printf("== testing basic operations\n");
 
     int *vals;
     while(!(vals = xmalloc(sizeof(int) * N))){}
@@ -1301,7 +1808,8 @@ static void all() {
             assert(v && *(int*)v == vals[i]);
         }
     }
-
+    
+    printf("== testing ascend\n");
     {  
         // ascend
         struct iter_ctx ctx = { .btree = btree, .rev = false };
@@ -1326,6 +1834,8 @@ static void all() {
             assert(ret && !ctx.bad && ctx.count == N-i-1);
         }
     }
+
+    printf("== testing descend\n");
     {  
         // decend
         struct iter_ctx ctx = { .btree = btree, .rev = true };
@@ -1360,6 +1870,8 @@ static void all() {
         assert(v && *(int*)v == vals[i]);
         assert(btree_sane(btree));
     }
+
+    printf("== testing pop-min\n");
 
     // reinsert
     shuffle(vals, N, sizeof(int));
@@ -1396,6 +1908,7 @@ static void all() {
         assert(btree_sane(btree));
     }
 
+    printf("== testing pop-max\n");
     // reinsert
     shuffle(vals, N, sizeof(int));
     for (int i = 0; i < N; i++) {
@@ -1415,8 +1928,8 @@ static void all() {
     }
 
     btree_free(btree);
-    
     xfree(vals);
+
     if (total_allocs != 0) {
         fprintf(stderr, "total_allocs: expected 0, got %lu\n", total_allocs);
         exit(1);
@@ -1463,6 +1976,17 @@ static void all() {
 
 bool simple_iter(const void *item, void *udata) {
     return true;
+}
+
+enum btree_action del_asc_odds(void *item, void *udata) {
+    int count = *(int*)udata;
+    count++;
+    *(int*)udata = count;
+    if ((count & 1) == 1) {
+        return BTREE_DELETE;
+    } else {
+        return BTREE_NONE;
+    }
 }
 
 static void benchmarks() {
@@ -1558,6 +2082,7 @@ static void benchmarks() {
         btree_ascend(btree, NULL, simple_iter, NULL);
         break;
     })
+
     bench("descend", N, {
         btree_descend(btree, NULL, simple_iter, NULL);
         break;
@@ -1567,18 +2092,40 @@ static void benchmarks() {
         btree_pop_min(btree);
     })
 
+    // -- pop last items from tree -- 
+    // reinsert
     shuffle(vals, N, sizeof(int));
     for (int i = 0; i < N; i++) {
         btree_set(btree, &vals[i]);
     }
-
     bench("pop-max", N, {
         btree_pop_max(btree);
     })
 
+    // -- delete all odd value items from the tree -- 
+    // reinsert
+    shuffle(vals, N, sizeof(int));
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &vals[i]);
+    }
+    qsort(vals, N, sizeof(int), compare_ints_nudata);
+    int count = 0;
+    bench("asc-del-odds", N, {
+        btree_action_ascend(btree, NULL, del_asc_odds, &count);
+        break;
+    });
 
+    // reinsert
+    for (int i = 0; i < N; i++) {
+        btree_set(btree, &vals[i]);
+    }
+    count = 0;
+    bench("desc-del-odds", N, {
+        btree_action_descend(btree, NULL, del_asc_odds, &count);
+        break;
+    });
 
-
+    
 
     btree_free(btree);
     xfree(vals);
@@ -1594,7 +2141,8 @@ int main() {
         benchmarks();
     } else {
         printf("Running btree.c tests...\n");
-        all();
+        test_basic();
+        test_action_ascend();
         printf("PASSED\n");
     }
 }
