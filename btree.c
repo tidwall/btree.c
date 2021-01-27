@@ -82,7 +82,7 @@ struct pool {
 
 // btree is a standard B-tree with post-set splits.
 struct btree {
-    int (*compare)(const void *a, const void *b, void *udata);
+    int (*_compare)(const void *a, const void *b, void *udata);
     void *udata;
     struct node *root;
     size_t count;
@@ -97,6 +97,10 @@ struct btree {
     void *litem;        // last load item
     struct node *lnode; // last load node
 };
+
+static int btcompare(struct btree *btree, const void *a, const void *b) {
+    return btree->_compare(a, b, btree->udata);
+}
 
 static struct node *node_new(struct btree *btree, bool leaf) {
     size_t sz = sizeof(struct node); 
@@ -284,7 +288,7 @@ struct btree *btree_new(size_t elsize, size_t max_items,
         btfree(btree);
         return NULL;
     }
-    btree->compare = compare;
+    btree->_compare = compare;
     btree->max_items = max_items;
     btree->min_items = btree->max_items*40/100;
     btree->elsize = elsize;
@@ -375,7 +379,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
                 index = node->num_items-1;
             }
             void *item = get_item_at(btree->elsize, node, (size_t)index);
-            int cmp = btree->compare(key, item, btree->udata);
+            int cmp = btcompare(btree, key, item);
             if (cmp == 0) {
                 *found = true;
                 return index;
@@ -391,7 +395,7 @@ static int node_find(struct btree *btree, struct node *node, void *key,
     while ( low <= high ) {
         int mid = (low + high) / 2;
         void *item = get_item_at(btree->elsize, node, (size_t)mid);
-        int cmp = btree->compare(key, item, btree->udata);
+        int cmp = btcompare(btree, key, item);
         if (cmp == 0) {
             *found = true;
             index = mid;
@@ -513,7 +517,7 @@ void *btree_load(struct btree *btree, void *item) {
     if (btree->litem && 
         btree->lnode && 
         (size_t)btree->lnode->num_items < btree->max_items-2 &&
-        btree->compare(item, btree->litem, btree->udata) > 0)
+        btcompare(btree, item, btree->litem) > 0)
     {
         set_item_at(btree->elsize, btree->lnode, 
                     (size_t)btree->lnode->num_items, item);
@@ -572,10 +576,8 @@ enum delact {
 };
 
 static bool node_delete(struct btree *btree, struct node *node, enum delact act, 
-                        size_t index, void *key,
-                        int (*compare)(const void *a, const void *b, 
-                                       void *udata), 
-                        void *prev, uint64_t *hint, int depth)
+                        size_t index, void *key, void *prev, uint64_t *hint, 
+                        int depth)
 {
     int i = 0;
     bool found = false;
@@ -617,23 +619,23 @@ static bool node_delete(struct btree *btree, struct node *node, enum delact act,
             // popping off the max item into into its parent branch to maintain
             // a balanced tree.
             i++;
-            node_delete(btree, node->children[i], POPMAX, 0, NULL, 
-                        NULL, prev, hint, depth+1);
+            node_delete(btree, node->children[i], POPMAX, 0, NULL,  prev, hint, 
+                        depth+1);
             deleted = true;
         } else {
             // item was found in branch, copy its contents, delete it, and 
             // begin popping off the max items in child nodes.
             copy_item_into(btree->elsize, node, (size_t)i, prev);
             char tmp_item[btree->elsize]; // VLA
-            node_delete(btree, node->children[i], POPMAX, 0, NULL, NULL, 
-                        tmp_item, hint, depth+1);
+            node_delete(btree, node->children[i], POPMAX, 0, NULL, tmp_item, 
+                        hint, depth+1);
             set_item_at(btree->elsize, node, (size_t)i, tmp_item);
             deleted = true;
         }
     } else {
         // item was not found in this branch, keep searching.
-        deleted = node_delete(btree, node->children[i], act, index, key,
-                              compare, prev, hint, depth+1);
+        deleted = node_delete(btree, node->children[i], act, index, key, prev, 
+                              hint, depth+1);
     }
     if (!deleted) {
         return false;
@@ -695,7 +697,7 @@ static void *delete_x(struct btree *btree, enum delact act, size_t index,
         return NULL;
     }
     bool deleted = node_delete(btree, btree->root, act, index, key, 
-                               btree->compare, btree->spare1, hint, 0);
+                               btree->spare1, hint, 0);
     if (!deleted) {
         return NULL;
     }
@@ -972,7 +974,7 @@ static int node_action_ascend(struct btree *btree, struct node *node,
             }
         case BTREE_UPDATE: {
             void *item = get_item_at(btree->elsize, node, (size_t)i);
-            if (btree->compare(item, btree->spare1, btree->udata)) {
+            if (btcompare(btree, item, btree->spare1)) {
                 // Item keys have diverged. This is not fatal, but we need to
                 // retry the operation until we get the response we're looking
                 // for. There is a risk that a user, who does not understand
@@ -1042,7 +1044,7 @@ static int node_action_descend(struct btree *btree, struct node *node,
             }
         case BTREE_UPDATE: {
             void *item = get_item_at(btree->elsize, node, (size_t)i);
-            if (btree->compare(item, btree->spare1, btree->udata)) {
+            if (btcompare(btree, item, btree->spare1)) {
                 // Item keys have diverged. This is not fatal, but we need to
                 // retry the operation until we get the response we're looking
                 // for. There is a risk that a user, who does not understand
@@ -1319,7 +1321,7 @@ static void sane_walk(const void *item, void *udata) {
         return;
     }
     if (ctx->last != NULL) {
-        if (ctx->btree->compare(ctx->last, item, ctx->btree->udata) >= 0) {
+        if (btcompare(ctx->btree, ctx->last, item) >= 0) {
             ctx->bad = true;
             return;
         }
@@ -1452,12 +1454,12 @@ static bool iter(const void *item, void *udata) {
     }
     if (ctx->last) {
         if (ctx->rev) {
-            if (ctx->btree->compare(item, ctx->last, ctx->btree->udata) >= 0) {
+            if (btcompare(ctx->btree, item, ctx->last) >= 0) {
                 ctx->bad = true;
                 return false;
             }
         } else {
-            if (ctx->btree->compare(ctx->last, item, ctx->btree->udata) >= 0) {
+            if (btcompare(ctx->btree, ctx->last, item) >= 0) {
                 ctx->bad = true;
                 return false;
             }
