@@ -8,11 +8,6 @@
 #include <stdint.h>
 #include "btree.h"
 
-#ifdef __clang__
-#pragma clang diagnostic ignored "-Wpadded"
-#pragma clang diagnostic ignored "-Wvla"
-#endif
-
 static void *(*_malloc)(size_t) = NULL;
 static void (*_free)(void *) = NULL;
 
@@ -33,8 +28,9 @@ void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*)) {
 }(void)(0)
 
 struct node {
-    bool leaf;
     short num_items;
+    bool leaf;
+    char unused[sizeof(void*)-3]; // explicit padding
     char *items;
     struct node *children[];
 };
@@ -88,12 +84,12 @@ struct btree {
     size_t count;
     struct pool pool;
     bool oom;
+    char unused[sizeof(void*)-1]; // explicit padding
     size_t height;
     size_t max_items;
     size_t min_items;
     size_t elsize;
-    void *spare1;       // holds the result of sets and deletes, etc.
-    void *spare2;       // holds the result of sets and deletes, etc.
+    void *spares[3];    // holds the result of sets and deletes, etc.
     void *litem;        // last load item
     struct node *lnode; // last load node
 };
@@ -276,17 +272,18 @@ struct btree *btree_new(size_t elsize, size_t max_items,
         return NULL;
     }
     memset(btree, 0, sizeof(struct btree));
-    btree->spare1 = btmalloc(elsize);
-    btree->spare2 = btmalloc(elsize);
-    if (!btree->spare1 || !btree->spare2) {
-        if (btree->spare1) {
-            btfree(btree->spare1);
+    int nspares = sizeof(btree->spares)/sizeof(void*);
+    for (int i = 0; i < nspares; i++) {
+        btree->spares[i] = btmalloc(elsize);
+        if (!btree->spares[i]) {
+            for (i = 0; i < nspares; i++) {
+                if (btree->spares[i]) {
+                    btfree(btree->spares[i]);
+                }        
+            }
+            btfree(btree);
+            return NULL;
         }
-        if (btree->spare2) {
-            btfree(btree->spare2);
-        }
-        btfree(btree);
-        return NULL;
     }
     btree->_compare = compare;
     btree->max_items = max_items;
@@ -315,8 +312,10 @@ void btree_free(struct btree *btree) {
         node_free(btree->root);
     }
     release_pool(btree);
-    btfree(btree->spare1);
-    btfree(btree->spare2);
+    int nspares = sizeof(btree->spares)/sizeof(void*);
+    for (int i = 0; i < nspares; i++) {
+        btfree(btree->spares[i]);
+    }
     btfree(btree);
 }
 
@@ -422,7 +421,7 @@ static bool node_set(struct btree *btree, struct node *node, void *item,
     bool found = false;
     int i = node_find(btree, node, item, &found, hint, depth);
     if (found) {
-        swap_item_at(btree->elsize, node, (size_t)i, item, btree->spare1);
+        swap_item_at(btree->elsize, node, (size_t)i, item, btree->spares[0]);
         return true;
     }
     if (node->leaf) {
@@ -467,7 +466,7 @@ static void *btree_set_x(struct btree *btree, void *item, bool lean_left,
         return NULL;
     }
     if (node_set(btree, btree->root, item, lean_left, hint, 0)) {
-        return btree->spare1;
+        return btree->spares[0];
     }
     btree->count++;
     if ((size_t)btree->root->num_items == (btree->max_items-1)) {
@@ -626,10 +625,9 @@ static bool node_delete(struct btree *btree, struct node *node, enum delact act,
             // item was found in branch, copy its contents, delete it, and 
             // begin popping off the max items in child nodes.
             copy_item_into(btree->elsize, node, (size_t)i, prev);
-            char tmp_item[btree->elsize]; // VLA
-            node_delete(btree, node->children[i], POPMAX, 0, NULL, tmp_item, 
-                        hint, depth+1);
-            set_item_at(btree->elsize, node, (size_t)i, tmp_item);
+            node_delete(btree, node->children[i], POPMAX, 0, NULL, 
+                        btree->spares[2], hint, depth+1);
+            set_item_at(btree->elsize, node, (size_t)i, btree->spares[2]);
             deleted = true;
         }
     } else {
@@ -697,7 +695,7 @@ static void *delete_x(struct btree *btree, enum delact act, size_t index,
         return NULL;
     }
     bool deleted = node_delete(btree, btree->root, act, index, key, 
-                               btree->spare1, hint, 0);
+                               btree->spares[0], hint, 0);
     if (!deleted) {
         return NULL;
     }
@@ -712,7 +710,7 @@ static void *delete_x(struct btree *btree, enum delact act, size_t index,
         btree->height--;
     }
     btree->count--;
-    return btree->spare1;
+    return btree->spares[0];
 }
 
 // btree_delete_hint is the same as btree_delete except that an optional "hint"
@@ -954,10 +952,10 @@ static int node_action_ascend(struct btree *btree, struct node *node,
                 return ret;
             }
         }
-        copy_item_into(btree->elsize, node, (size_t)i, btree->spare1);
-        switch (iter(btree->spare1, udata)) {
+        copy_item_into(btree->elsize, node, (size_t)i, btree->spares[0]);
+        switch (iter(btree->spares[0], udata)) {
         case BTREE_NONE:
-            break;;
+            break;
         case BTREE_DELETE:
             if (node->leaf && (size_t)node->num_items > btree->min_items) {
                 // delete in place
@@ -967,14 +965,14 @@ static int node_action_ascend(struct btree *btree, struct node *node,
                 break;
             } else {
                 // rebalancing is required, go the slow route
-                copy_item_into(btree->elsize, node, (size_t)i, btree->spare2);
-                btree_delete(btree, btree->spare2);
-                *pivot = btree->spare2;
+                copy_item_into(btree->elsize, node, (size_t)i, btree->spares[1]);
+                btree_delete(btree, btree->spares[1]);
+                *pivot = btree->spares[1];
                 return BTSTARTOVER;
             }
         case BTREE_UPDATE: {
             void *item = get_item_at(btree->elsize, node, (size_t)i);
-            if (btcompare(btree, item, btree->spare1)) {
+            if (btcompare(btree, item, btree->spares[0])) {
                 // Item keys have diverged. This is not fatal, but we need to
                 // retry the operation until we get the response we're looking
                 // for. There is a risk that a user, who does not understand
@@ -984,7 +982,7 @@ static int node_action_ascend(struct btree *btree, struct node *node,
                 i--;
             } else {
                 // Item keys match, update memory and move on.
-                set_item_at(btree->elsize, node, (size_t)i, btree->spare1);
+                set_item_at(btree->elsize, node, (size_t)i, btree->spares[0]);
             }
             break;
         }
@@ -1024,8 +1022,8 @@ static int node_action_descend(struct btree *btree, struct node *node,
         i--;
     }
     for (;i >= 0;i--) {
-        copy_item_into(btree->elsize, node, (size_t)i, btree->spare1);
-        switch (iter(btree->spare1, udata)) {
+        copy_item_into(btree->elsize, node, (size_t)i, btree->spares[0]);
+        switch (iter(btree->spares[0], udata)) {
         case BTREE_NONE:
             break;
         case BTREE_DELETE:
@@ -1037,14 +1035,14 @@ static int node_action_descend(struct btree *btree, struct node *node,
                 break;
             } else {
                 // rebalancing is required, go the slow route
-                copy_item_into(btree->elsize, node, (size_t)i, btree->spare2);
-                btree_delete(btree, btree->spare2);
-                *pivot = btree->spare2;
+                copy_item_into(btree->elsize, node, (size_t)i, btree->spares[1]);
+                btree_delete(btree, btree->spares[1]);
+                *pivot = btree->spares[1];
                 return BTSTARTOVER;
             }
         case BTREE_UPDATE: {
             void *item = get_item_at(btree->elsize, node, (size_t)i);
-            if (btcompare(btree, item, btree->spare1)) {
+            if (btcompare(btree, item, btree->spares[0])) {
                 // Item keys have diverged. This is not fatal, but we need to
                 // retry the operation until we get the response we're looking
                 // for. There is a risk that a user, who does not understand
@@ -1054,7 +1052,7 @@ static int node_action_descend(struct btree *btree, struct node *node,
                 i++;
             } else {
                 // Item keys match, update memory and move on.
-                set_item_at(btree->elsize, node, (size_t)i, btree->spare1);
+                set_item_at(btree->elsize, node, (size_t)i, btree->spares[0]);
             }
             break;
         }
