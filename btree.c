@@ -11,9 +11,6 @@
 static void *(*_malloc)(size_t) = NULL;
 static void (*_free)(void *) = NULL;
 
-#define btmalloc (_malloc?_malloc:malloc)
-#define btfree (_free?_free:free)
-
 // btree_set_allocator allows for configuring a custom allocator for
 // all btree library operations. This function, if needed, should be called
 // only once at startup and a prior to calling btree_new().
@@ -78,6 +75,9 @@ struct pool {
 
 // btree is a standard B-tree with post-set splits.
 struct btree {
+    void *(*malloc)(size_t);
+    void *(*realloc)(void *, size_t);
+    void (*free)(void *);
     int (*_compare)(const void *a, const void *b, void *udata);
     void *udata;
     struct node *root;
@@ -105,7 +105,7 @@ static struct node *node_new(struct btree *btree, bool leaf) {
     }
     size_t itemsoff = sz;
     sz += btree->elsize*(btree->max_items-1);
-    struct node *node = btmalloc(sz);
+    struct node *node = btree->malloc(sz);
     if (!node) {
         return NULL;
     }
@@ -115,14 +115,14 @@ static struct node *node_new(struct btree *btree, bool leaf) {
     return node;
 }
 
-static void node_free(struct node *node) {
+static void node_free(struct btree *btree, struct node *node) {
     if (!node->leaf) {
         for (int i = 0; i < node->num_items; i++) {
-            node_free(node->children[i]);
+            node_free(btree, node->children[i]);
         }
-        node_free(node->children[node->num_items]);
+        node_free(btree, node->children[node->num_items]);
     }
-    btfree(node);
+    btree->free(node);
 }
 
 static struct node *gimme_node(struct group *group) {
@@ -138,14 +138,14 @@ static struct node *gimme_branch(struct btree *btree) {
     return gimme_node(&btree->pool.branches);
 }
 
-static bool grow_group(struct group *group) {
+static bool grow_group(struct btree *btree, struct group *group) {
     size_t cap = group->cap?group->cap*2:1;
-    struct node **nodes = btmalloc(sizeof(struct node*)*cap);
+    struct node **nodes = btree->malloc(sizeof(struct node*)*cap);
     if (!nodes) {
         return false;
     }
     memcpy(nodes, group->nodes, group->len*sizeof(struct node*));
-    btfree(group->nodes);
+    btree->free(group->nodes);
     group->nodes = nodes;
     group->cap = cap;
     return true;
@@ -160,12 +160,12 @@ static void takeaway(struct btree *btree, struct node *node) {
         group = &btree->pool.branches;
     }
     if (group->len == MAXLEN) {
-        btfree(node);
+        btree->free(node);
         return;
     }
     if (group->len == group->cap) {
-        if (!grow_group(group)) {
-            btfree(node);
+        if (!grow_group(btree, group)) {
+            btree->free(node);
             return;
         }
     }
@@ -179,7 +179,7 @@ static void takeaway(struct btree *btree, struct node *node) {
 static bool fill_pool(struct btree *btree) {
     if (btree->pool.leaves.len == 0) {
         if (btree->pool.leaves.cap == 0) {
-            if (!grow_group(&btree->pool.leaves)) {
+            if (!grow_group(btree, &btree->pool.leaves)) {
                 return false;
             }
         }
@@ -191,7 +191,7 @@ static bool fill_pool(struct btree *btree) {
     }
     while (btree->pool.branches.len < btree->height) {
         if (btree->pool.branches.len == btree->pool.branches.cap) {
-            if (!grow_group(&btree->pool.branches)) {
+            if (!grow_group(btree, &btree->pool.branches)) {
                 return false;
             }
         }
@@ -258,6 +258,27 @@ struct btree *btree_new(size_t elsize, size_t max_items,
                                        void *udata),
                         void *udata)
 {
+    return btree_new_with_allocator(
+        (_malloc?_malloc:malloc),
+        NULL, // this library does not currently use realloc
+        (_free?_free:free),
+        elsize, max_items, compare, udata
+    );
+}
+
+// btree_new_with_allocator returns a new btree using a custom allocator.
+// See btree_new for more information
+struct btree *btree_new_with_allocator(
+                        void *(*malloc)(size_t), 
+                        void *(*realloc)(void *, size_t), 
+                        void (*free)(void*),
+                        size_t elsize, size_t max_items,
+                        int (*compare)(const void *a, const void *b, 
+                                       void *udata),
+                        void *udata)
+{
+    _malloc = _malloc ? _malloc : malloc;
+    _free = _free ? _free : free;
     if (max_items == 0) {
         max_items = 256;
     } else {
@@ -267,21 +288,21 @@ struct btree *btree_new(size_t elsize, size_t max_items,
     }
     if (elsize == 0) panic("elsize is zero");
     if (compare == NULL) panic("compare is null");
-    struct btree *btree = btmalloc(sizeof(struct btree));
+    struct btree *btree = _malloc(sizeof(struct btree));
     if (!btree) {
         return NULL;
     }
     memset(btree, 0, sizeof(struct btree));
     int nspares = sizeof(btree->spares)/sizeof(void*);
     for (int i = 0; i < nspares; i++) {
-        btree->spares[i] = btmalloc(elsize);
+        btree->spares[i] = _malloc(elsize);
         if (!btree->spares[i]) {
             for (i = 0; i < nspares; i++) {
                 if (btree->spares[i]) {
-                    btfree(btree->spares[i]);
+                    _free(btree->spares[i]);
                 }        
             }
-            btfree(btree);
+            _free(btree);
             return NULL;
         }
     }
@@ -290,18 +311,20 @@ struct btree *btree_new(size_t elsize, size_t max_items,
     btree->min_items = btree->max_items*40/100;
     btree->elsize = elsize;
     btree->udata = udata;
+    btree->malloc = _malloc;
+    btree->free = _free;
     return btree;
 }
 
 static void release_pool(struct btree *btree) {
     for (size_t i = 0; i < btree->pool.leaves.len; i++) {
-        btfree(btree->pool.leaves.nodes[i]);
+        btree->free(btree->pool.leaves.nodes[i]);
     }
-    btfree(btree->pool.leaves.nodes);
+    btree->free(btree->pool.leaves.nodes);
     for (size_t i = 0; i < btree->pool.branches.len; i++) {
-        btfree(btree->pool.branches.nodes[i]);
+        btree->free(btree->pool.branches.nodes[i]);
     }
-    btfree(btree->pool.branches.nodes);
+    btree->free(btree->pool.branches.nodes);
     memset(&btree->pool, 0, sizeof(struct pool));
 }
 
@@ -309,14 +332,14 @@ static void release_pool(struct btree *btree) {
 // you need to free those then do so prior to calling this function.
 void btree_free(struct btree *btree) {
     if (btree->root) {
-        node_free(btree->root);
+        node_free(btree, btree->root);
     }
     release_pool(btree);
     int nspares = sizeof(btree->spares)/sizeof(void*);
     for (int i = 0; i < nspares; i++) {
-        btfree(btree->spares[i]);
+        btree->free(btree->spares[i]);
     }
-    btfree(btree);
+    btree->free(btree);
 }
 
 static void reset_load_fields(struct btree *btree) {

@@ -15,6 +15,14 @@ struct btree *btree_new(size_t elsize, size_t max_items,
                         int (*compare)(const void *a, const void *b, 
                                        void *udata),
                         void *udata);
+struct btree *btree_new_with_allocator(
+                        void *(*malloc)(size_t), 
+                        void *(*realloc)(void *, size_t), 
+                        void (*free)(void*),
+                        size_t elsize, size_t max_items,
+                        int (*compare)(const void *a, const void *b, 
+                                       void *udata),
+                        void *udata);
 void btree_free(struct btree *btree);
 bool btree_oom(struct btree *btree);
 size_t btree_height(struct btree *btree);
@@ -69,8 +77,7 @@ void btree_action_descend_hint(struct btree *btree, void *pivot,
                                                          void *udata),
                                void *udata, uint64_t *hint);
 
-// custom allocator
-
+// DEPRECATED: use `btree_new_with_allocator`
 void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*));
 
 
