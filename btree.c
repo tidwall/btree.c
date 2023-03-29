@@ -277,6 +277,7 @@ struct btree *btree_new_with_allocator(
                                        void *udata),
                         void *udata)
 {
+    (void)realloc;
     _malloc = _malloc ? _malloc : malloc;
     _free = _free ? _free : free;
     if (max_items == 0) {
@@ -1219,11 +1220,9 @@ bool btree_oom(struct btree *btree) {
 //==============================================================================
 #ifdef BTREE_TEST
 
-// #ifdef __clang__
-// #pragma clang diagnostic ignored "-Weverything"
-// #endif
-// #pragma GCC diagnostic ignored "-Wextra"
-
+#ifdef __clang__
+#pragma GCC diagnostic ignored "-Wcompound-token-split-by-macro"
+#endif
 
 static void node_walk(struct btree *btree, struct node *node, 
                       void (*fn)(const void *item, void *udata), void *udata) 
@@ -1298,12 +1297,12 @@ static bool btree_saneheight(struct btree *btree) {
 
 static bool node_saneprops(struct btree *btree, struct node *node, int height) {
     if (height == 1) {
-        if (node->num_items < 1 || node->num_items > btree->max_items) {
+        if (node->num_items < 1 || (size_t)node->num_items > btree->max_items) {
             return false;
         }
     } else {
-        if (node->num_items < btree->min_items || 
-            node->num_items > btree->max_items) 
+        if ((size_t)node->num_items < btree->min_items || 
+            (size_t)node->num_items > btree->max_items) 
         {
             return false;
         }
@@ -1537,6 +1536,7 @@ enum btree_action pair_keep_desc(void *item, void *udata) {
 
 
 enum btree_action pair_update(void *item, void *udata) {
+    (void)udata;
     ((struct pair*)item)->val++;
     return BTREE_UPDATE;
 }
@@ -1564,6 +1564,7 @@ bool pair_update_check_desc(const void *item, void *udata) {
 }
 
 enum btree_action pair_delete(void *item, void *udata) {
+    (void)item; (void)udata;
     return BTREE_DELETE;
 }
 
@@ -1643,9 +1644,9 @@ static void test_action_ascend() {
         for (int i = 0; i < N; i++) {
             btree_set(btree, &pairs[i]);
         }
-        assert(btree_count(btree) == N);
+        assert(btree_count(btree) == (size_t)N);
         btree_action_ascend(btree, &pairs[N/i], pair_delete, NULL);
-        assert(btree_count(btree) == N/i);
+        assert(btree_count(btree) == (size_t)(N/i));
         assert(btree_sane(btree));
     }
 
@@ -1658,7 +1659,7 @@ static void test_action_ascend() {
     // cycle the BTREE_NONE, BTREE_UPDATE, BTREE_DELETE
     int cycle = 0;
     btree_action_ascend(btree, NULL, pair_cycle, &cycle);
-    assert(btree_count(btree) == N-N/3);
+    assert(btree_count(btree) == (size_t)(N-N/3));
     assert(btree_sane(btree));
     for (int i = 0; i < N; i++) {
         struct pair *pair = btree_get(btree, &pairs[i]);
@@ -1716,9 +1717,9 @@ static void test_action_ascend() {
         for (int i = 0; i < N; i++) {
             btree_set(btree, &pairs[i]);
         }
-        assert(btree_count(btree) == N);
+        assert(btree_count(btree) == (size_t)(N));
         btree_action_descend(btree, &pairs[N/i], pair_delete, NULL);
-        assert(btree_count(btree) == N-(N/i+1));
+        assert(btree_count(btree) == (size_t)(N-(N/i+1)));
         assert(btree_sane(btree));
     }
 
@@ -1730,7 +1731,7 @@ static void test_action_ascend() {
     // cycle the BTREE_NONE, BTREE_UPDATE, BTREE_DELETE
     cycle = 0;
     btree_action_descend(btree, NULL, pair_cycle, &cycle);
-    assert(btree_count(btree) == N-N/3);
+    assert(btree_count(btree) == (size_t)(N-N/3));
     assert(btree_sane(btree));
     for (int i = N-1, j = 0; i >= 0; i--, j++) {
         struct pair *pair = btree_get(btree, &pairs[i]);
@@ -1998,10 +1999,12 @@ static void test_basic() {
 }}
 
 bool simple_iter(const void *item, void *udata) {
+    (void)item; (void)udata;
     return true;
 }
 
 enum btree_action del_asc_odds(void *item, void *udata) {
+    (void)item;
     int count = *(int*)udata;
     count++;
     *(int*)udata = count;
