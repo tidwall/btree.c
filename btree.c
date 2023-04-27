@@ -27,7 +27,6 @@ void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*)) {
 struct node {
     short num_items;
     bool leaf;
-    char unused[sizeof(void*)-3]; // explicit padding
     char *items;
     struct node *children[];
 };
@@ -84,7 +83,6 @@ struct btree {
     size_t count;
     struct pool pool;
     bool oom;
-    char unused[sizeof(void*)-1]; // explicit padding
     size_t height;
     size_t max_items;
     size_t min_items;
