@@ -24,7 +24,11 @@ if [[ "$1" != "bench" ]]; then
         CFLAGS="$CFLAGS -fno-omit-frame-pointer"
         CFLAGS="$CFLAGS -fprofile-instr-generate"
         CFLAGS="$CFLAGS -fcoverage-mapping"
-        CFLAGS="$CFLAGS -fsanitize=address"
+        if [[ "$RACE" == "1" ]]; then
+            CFLAGS="$CFLAGS -fsanitize=thread"
+        else
+            CFLAGS="$CFLAGS -fsanitize=address"
+        fi
         CFLAGS="$CFLAGS -fsanitize=undefined"
         CFLAGS="$CFLAGS -fno-inline"
         CFLAGS="$CFLAGS -pedantic"
@@ -42,7 +46,7 @@ if [[ "$1" != "bench" ]]; then
 else
     CFLAGS=${CFLAGS:-"-O3"}
 fi
-CFLAGS="$CFLAGS -DTEST_PRIVATE_FUNCTIONS"
+CFLAGS="$CFLAGS -DTEST_PRIVATE_FUNCTIONS -DTEST_DEBUG"
 CC=${CC:-cc}
 echo "CC: $CC"
 echo "CFLAGS: $CFLAGS"
@@ -55,6 +59,9 @@ if [[ "$1" == "bench" ]]; then
     ./a.out $@
 else
     echo "For benchmarks: 'run.sh bench'"
+    if [[ "$RACE" != "1" ]]; then
+        echo "For data race check: 'RACE=1 run.sh'"
+    fi
     echo "TESTING..."
     for f in *; do 
         if [[ "$f" != test_*.c ]]; then continue; fi 

@@ -1,5 +1,9 @@
+#include <pthread.h>
 #include "tests.h"
 
+void pair_print(void *item) {
+    printf("%d:%d", ((struct pair*)item)->key, ((struct pair*)item)->val);
+}
 
 void test_clone_various(void) {
 
@@ -101,14 +105,117 @@ void cobj_free(struct cobj *obj) {
     xfree(obj);
 }
 
-void test_clone_items(void) {
-    int N = 10000;
-    struct cobj *objs = xmalloc(sizeof(struct cobj*)*N);
+int cobj_compare(const void *a, const void *b, void *udata) {
+    assert(!udata);
+    return strcmp((*(struct cobj**)a)->key, (*(struct cobj**)b)->key);
+}
+
+bool bt_cobj_clone(const void *item, void *into, void *udata) {
+    (void)udata;
+    struct cobj *obj = *(struct cobj**)item;
+    struct cobj *obj2 = cobj_new(obj->key, obj->val);
+    if (!obj2) return false;
+    memcpy(into, &obj2, sizeof(struct cobj*));
+    return true;
+}
+
+void bt_cobj_free(const void *item, void *udata) {
+    (void)udata;
+    struct cobj *obj = *(struct cobj**)item;
+    cobj_free(obj);
+}
+
+struct thctx {
+    pthread_mutex_t *mu;
+    int nobjs;
+    struct cobj **objs;
+    struct btree *btree;
+};
+
+void *thdwork(void *tdata) {
+    pthread_mutex_t *mu = ((struct thctx *)tdata)->mu;
+    // int NOBJS = ((struct thctx *)tdata)->nobjs;
+    // struct cobj **objs = ((struct thctx *)tdata)->objs;
+    struct btree *btree = ((struct thctx *)tdata)->btree;
+
+    rsleep(0.1, 0.2);
+    assert(!pthread_mutex_lock(mu));
+    struct btree *btree2 = btree_clone(btree);
+    assert(!pthread_mutex_unlock(mu));
+    rsleep(0.1, 0.2);
+
+    // we now have a clone of the database
+
+
+
+
+    btree_free(btree2);
+    return NULL;
+}
+
+
+void test_clone_threads(void) {
+    // This should probably be tested with both:
+    //
+    //   $ run.sh
+    //   $ RACE=1 run.sh
+    //
+    pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+    int NOBJS = 10000;
+    int NCLONES = 100;
+    struct cobj **objs = xmalloc(sizeof(struct cobj*)*NOBJS);
+    struct btree *btree = btree_new_for_test(sizeof(struct cobj*), 12, 
+        cobj_compare, NULL);
+    btree_set_item_callbacks(btree, bt_cobj_clone, bt_cobj_free);
+    for (int i = 0; i < NOBJS; i++) {
+        char *key = rand_key(10);
+        char *val = rand_key(10);
+        objs[i] = cobj_new(key, val);
+        xfree(key);
+        xfree(val);
+        const void *prev = btree_set(btree, &objs[i]);
+        if (prev) {
+            // already exists with same key.
+            // replace new with old and try again.
+            struct cobj *prev_obj = *(struct cobj**)prev;
+            btree_set(btree, &prev_obj);
+            cobj_free(objs[i]);
+            i--;
+        }
+    }
+
+    // assert(btree_count(btree) == (size_t)NOBJS);
+
+    // we now have a list of objects and a btree fill the same objects.
+    pthread_t *threads = xmalloc(NCLONES*sizeof(pthread_t));
+    for (int i = 0; i < NCLONES; i++) {
+        assert(!pthread_create(&threads[i], NULL, thdwork, &(struct thctx){
+            .mu = &mu,
+            .nobjs = NOBJS,
+            .objs = objs,
+            .btree = btree,
+        }));
+        // assert(!pthread_join(threads[i], NULL));
+    }
+    for (int i = 0; i < NCLONES; i++) {
+         assert(!pthread_join(threads[i], NULL));
+    }
+
+    xfree(threads);
+
+
+
+
+
+    btree_free(btree);
+    for (int i = 0; i < NOBJS; i++) {
+        cobj_free(objs[i]);
+    }
     xfree(objs);
 }
 
 int main(int argc, char **argv) {
     do_chaos_test(test_clone_various);
-    do_test(test_clone_items);
+    do_test(test_clone_threads);
     return 0;
 }

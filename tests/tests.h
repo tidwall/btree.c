@@ -1,7 +1,9 @@
 #ifndef TESTS_H
 #define TESTS_H
 
+#include <unistd.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -22,6 +24,7 @@
 // private btree functions
 bool btree_sane(const struct btree *btree);
 int btree_compare(const struct btree *btree, const void *a, const void *b);
+void btree_print(struct btree *btree, void (*print)(void *item));
 
 int64_t crand(void) {
     uint64_t seed = 0;
@@ -70,6 +73,7 @@ static int64_t seed = 0;
 }
 
 static void shuffle(void *array, size_t numels, size_t elsize) {
+    if (numels < 2) return;
     char tmp[elsize];
     char *arr = array;
     for (size_t i = 0; i < numels - 1; i++) {
@@ -83,8 +87,8 @@ static void shuffle(void *array, size_t numels, size_t elsize) {
 void cleanup(void) {
 }
 
-size_t total_allocs = 0;
-size_t total_mem = 0;
+atomic_int total_allocs = 0;
+atomic_int total_mem = 0;
 
 double now(void) {
     struct timespec now;
@@ -103,15 +107,16 @@ static void *xmalloc(size_t size) {
     void *mem = malloc(sizeof(uint64_t)+size);
     assert(mem);
     *(uint64_t*)mem = size;
-    total_allocs++;
-    total_mem += size;
+    atomic_fetch_add(&total_allocs, 1);
+    atomic_fetch_add(&total_mem, (int)size);
     return (char*)mem+sizeof(uint64_t);
 }
 
 static void xfree(void *ptr) {
     if (ptr) {
-        total_mem -= *(uint64_t*)((char*)ptr-sizeof(uint64_t));
-        total_allocs--;
+        atomic_fetch_sub(&total_mem,
+            (int)(*(uint64_t*)((char*)ptr-sizeof(uint64_t))));
+        atomic_fetch_sub(&total_allocs, 1);
         free((char*)ptr-sizeof(uint64_t));
     }
 }
@@ -126,22 +131,31 @@ void init_test_allocator(bool random_failures) {
 }
 
 void cleanup_test_allocator(void) {
-    if (total_allocs > 0 || total_mem > 0) {
+    if (atomic_load(&total_allocs) > 0 || atomic_load(&total_mem) > 0) {
         fprintf(stderr, "test failed: %d unfreed allocations, %d bytes\n",
-            (int)total_allocs, (int)total_mem);
+            atomic_load(&total_allocs), atomic_load(&total_mem));
         exit(1);
     }
     __malloc = NULL;
     __free = NULL;
 }
 
-static struct btree *btree_new_for_test(size_t elsize, size_t max_items,
+// struct btree *btree_new_for_test(size_t elsize, size_t max_items,
+//     int (*compare)(const void *a, const void *b, void *udata),
+//     void *udata)
+// {
+//     return btree_new_with_allocator(__malloc, NULL, __free, elsize, max_items, 
+//         compare, udata);
+// }
+
+struct btree *btree_new_for_test(size_t elsize, size_t degree,
     int (*compare)(const void *a, const void *b, void *udata),
     void *udata)
 {
-    return btree_new_with_allocator(__malloc, NULL, __free, elsize, max_items, 
-        compare, udata);
+    return btree_new_with_allocator(__malloc, NULL, __free, elsize, 
+        degree, compare, udata);
 }
+
 
 char *commaize(unsigned int n) {
     char s1[64];
@@ -168,8 +182,8 @@ char *commaize(unsigned int n) {
     if (strlen(name) > 0) { \
         printf("%-14s ", name); \
     } \
-    size_t tmem = total_mem; \
-    size_t tallocs = total_allocs; \
+    size_t tmem = (size_t)atomic_load(&total_mem); \
+    size_t tallocs = (size_t)atomic_load(&total_allocs); \
     uint64_t bytes = 0; \
     clock_t begin = clock(); \
     for (int i = 0; i < N; i++) { \
@@ -188,12 +202,12 @@ char *commaize(unsigned int n) {
     if (bytes > 0) { \
         printf(" %.1f GB/sec", bytes_sec/1024/1024/1024); \
     } \
-    if (total_mem > tmem) { \
-        size_t used_mem = total_mem-tmem; \
+    if ((size_t)atomic_load(&total_mem) > tmem) { \
+        size_t used_mem = (size_t)atomic_load(&total_mem)-tmem; \
         printf(" %5.2f bytes/op", (double)used_mem/N); \
     } \
-    if (total_allocs > tallocs) { \
-        size_t used_allocs = total_allocs-tallocs; \
+    if ((size_t)atomic_load(&total_allocs) > tallocs) { \
+        size_t used_allocs = (size_t)atomic_load(&total_allocs)-tallocs; \
         printf(" %5.2f allocs/op", (double)used_allocs/N); \
     } \
     printf("\n"); \
@@ -201,16 +215,30 @@ char *commaize(unsigned int n) {
 
 
 #define DEF_MAX_ITEMS 6
+#define DEF_DEGREE    3
 #define DEF_N         2000
 
+#define OOM_WAIT(run) do { run ; } while (btree_oom(btree))
 #define OOM_WAIT(run) do { run ; } while (btree_oom(btree))
 
 char nothing[] = "nothing";
 
+static int compare_ints0(const void *a, const void *b) {
+    int ia = *(int*)a;
+    int ib = *(int*)b;
+    return (ia < ib) ? -1 : (ia > ib);
+}
+
 int compare_ints(const void *a, const void *b, void *udata) {
     assert(udata == nothing);
-    return *(int*)a - *(int*)b;
+    return compare_ints0(a, b);
 }
+
+int compare_ints1(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return compare_ints0(a, b);
+}
+
 
 struct iter_ctx {
     bool rev;
@@ -267,37 +295,6 @@ struct pair_keep_ctx {
     int count;
 };
 
-enum btree_action pair_keep(void *item, void *udata) {
-    struct pair_keep_ctx *ctx = udata;
-    if (ctx->count > 0) {
-        assert(compare_pairs_nudata(item, &ctx->last) > 0);
-    }
-    memcpy(&ctx->last, item, sizeof(struct pair));
-    ctx->count++;
-    return BTREE_NONE;
-}
-
-enum btree_action pair_keep_desc(void *item, void *udata) {
-    struct pair_keep_ctx *ctx = udata;
-    // struct pair *pair = (struct pair *)item;
-    // if (ctx->count == 0) {
-    //     printf("((%d))\n", pair->key);
-    // }
-    
-    if (ctx->count > 0) {
-        assert(compare_pairs_nudata(item, &ctx->last) < 0);
-    }
-    memcpy(&ctx->last, item, sizeof(struct pair));
-    ctx->count++;
-    return BTREE_NONE;
-}
-
-
-enum btree_action pair_update(void *item, void *udata) {
-    (void)udata;
-    ((struct pair*)item)->val++;
-    return BTREE_UPDATE;
-}
 
 bool pair_update_check(const void *item, void *udata) {
     int half = *(int*)udata;
@@ -321,30 +318,24 @@ bool pair_update_check_desc(const void *item, void *udata) {
     return true;
 }
 
-enum btree_action pair_delete(void *item, void *udata) {
-    (void)item; (void)udata;
-    return BTREE_DELETE;
-}
-
-
-enum btree_action pair_cycle(void *item, void *udata) {
-    int i = *(int*)udata;
-    *(int*)udata = i+1;
-    switch (i % 3) {
-    case 0:
-        return BTREE_NONE;
-    case 1:
-        ((struct pair*)item)->val++;
-        return BTREE_UPDATE;
-    case 2:
-        return BTREE_DELETE;
+char *rand_key(int nchars) {
+    char *key = xmalloc(nchars+1);
+    for (int i = 0 ; i < nchars; i++) {
+        key[i] = (rand()%26)+'a';
     }
-    fprintf(stderr, "reached unreachable code\n");
-    assert(0);
-    exit(1);
+    key[nchars] = '\0';
+    return key;
 }
 
-
-
+// rsleep randomly sleeps between min_secs and max_secs
+void rsleep(double min_secs, double max_secs) {
+    double duration = max_secs - min_secs;
+    double start = now();
+    while (now()-start < duration) {
+        usleep(10000); // sleep for ten milliseconds
+    }
+}
 
 #endif // TESTS_H
+
+
