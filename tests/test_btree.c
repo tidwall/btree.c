@@ -466,10 +466,58 @@ void test_btree_various(void) {
 
 }
 
+void pair_print(void *item) {
+    struct pair *pair = item;
+    printf("(%d:%d)", pair->key, pair->val);
+}
+
+void test_btree_delete(void) {
+    int N = 1000;
+
+    struct pair *pairs;
+    while (!(pairs = xmalloc(sizeof(struct pair) * N)));
+    for (int i = 0; i < N; i++) {
+        pairs[i].key = i;
+        pairs[i].val = 1;
+    }
+
+    struct btree *btree;
+    OOM_WAIT({btree = btree_new_for_test(sizeof(struct pair), 4, 
+        compare_pairs, nothing);});
+
+    // shuffle(pairs, N, sizeof(struct pair));
+
+    for (int i = 0; i < N; i++) {
+        const void *prev;
+        OOM_WAIT( { prev = btree_set(btree, &pairs[i]); } );
+        assert(!prev);
+    }
+
+    // btree_print(btree, pair_print);
+
+    // delete every other obj in btree2
+    for (int i = 0; i < N; i += 2) {
+        const void *v;
+        OOM_WAIT( { v = btree_delete(btree, &pairs[i]); } );
+        assert(v && ((struct pair*)v)->key == pairs[i].key);
+    }
+
+    // get every other obj
+    for (int i = 0; i < N; i += 2) {
+        const void *v;
+        OOM_WAIT( { v = btree_get(btree, &pairs[i]); } );
+        assert(!v);
+    }
+
+
+    btree_free(btree);
+    xfree(pairs);
+}
+
 int main(int argc, char **argv) {
     do_chaos_test(test_btree_operations);
     do_chaos_test(test_btree_load);
-    // do_test(test_btree);
+    do_chaos_test(test_btree_delete);
     do_test(test_btree_various);
     return 0;
 }
