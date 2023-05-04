@@ -39,7 +39,6 @@ const void *btree_load(struct btree *btree, const void *item);
 const void *btree_pop_min(struct btree *btree);
 const void *btree_pop_max(struct btree *btree);
 
-
 const void *btree_min(const struct btree *btree);
 const void *btree_max(const struct btree *btree);
 const void *btree_get(const struct btree *btree, const void *key);
@@ -47,7 +46,6 @@ bool btree_ascend(const struct btree *btree, const void *pivot,
     bool (*iter)(const void *item, void *udata), void *udata);
 bool btree_descend(const struct btree *btree, const void *pivot, 
     bool (*iter)(const void *item, void *udata), void *udata);
-
 
 // functions that support hints
 

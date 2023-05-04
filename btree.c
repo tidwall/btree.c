@@ -46,9 +46,9 @@ static void degree_to_min_max(int deg, int *min, int *max) {
 #endif
 
 // #ifdef TEST_DEBUG
-#define dbg_check_node_is_writable(node) assert(atomic_load(&(node)->rc) == 0);
+// #define dbg_assert(cond) assert(cond)
 // #else
-// #define dbg_check_node_is_writable(node)
+#define dbg_assert(cond)
 // #endif
 
 struct node {
@@ -66,7 +66,6 @@ struct btree {
     int (*compare)(const void *a, const void *b, void *udata);
     size_t (*search)(const struct btree *btree, struct node *node,
         const void *key, bool *found);
-    size_t direct_offset;
     void *udata;
     struct node *root;
     size_t count;
@@ -175,53 +174,6 @@ static int btcompare(const struct btree *btree, const void *a,
     return btree->compare(a, b, btree->udata);
 }
 
-/*
-#define ludo4(i, f) f; i++; f; i++; f; i++; f; i++;
-#define ludo8(i, f) ludo4(i, f); ludo4(i, f);
-#define ludo16(i, f) ludo8(i, f); ludo8(i, f);
-#define for1(i, n, f) while(i < (n)) { f; i++; }
-#define for4(i, n, f) while(i+4 <= (n)) { ludo4(i, f); } for1(i, n, f);
-#define for8(i, n, f) while(i+8 <= (n)) { ludo8(i, f); } for1(i, n, f);
-#define for16(i, n, f) while(i+16 <= (n)) { ludo16(i, f); } for1(i, n, f);
-
-#define def_comparator(name, type) \
-static size_t name(const struct btree *btree, struct node *node, \
-    const void *key, bool *found) \
-{ \
-    type ikey = *(type*)key; \
-    size_t i = 0; \
-    if (!btree->compare) { \
-        for8(i, node->num_items, { \
-            void *item = get_item_at((void*)btree, node, i); \
-            type iitem = *(type*)(((char*)item)+btree->direct_offset); \
-            if (ikey <= iitem) { \
-                *found = ikey == iitem; \
-                return i; \
-            } \
-        }); \
-    } else { \
-        for8(i, node->num_items, { \
-            void *item = get_item_at((void*)btree, node, i); \
-            type iitem = *(type*)(((char*)item)+btree->direct_offset); \
-            int cmp = (ikey < iitem) ? -1 : (ikey > iitem); \
-            if (cmp == 0) { \
-                cmp = btree->compare(key, item, btree->udata); \
-            } \
-            if (cmp <= 0) { \
-                *found = cmp == 0; \
-                return i; \
-            } \
-        }); \
-    } \
-    *found = false; \
-    return i; \
-} 
-
-def_comparator(scan_u64s, uint64_t)
-def_comparator(scan_i64s, int64_t)
-def_comparator(scan_ints, int)
-def_comparator(scan_doubles, double)
-*/
 static size_t node_bsearch(const struct btree *btree, 
     struct node *node, const void *key, bool *found) 
 {
@@ -341,23 +293,6 @@ struct btree *btree_new(size_t elsize, size_t degree,
     return btree_new_with_allocator(NULL, NULL, NULL, elsize, degree,
         compare, udata);
 }
-
-
-
-
-
-// void btree_set_direct_comparator(struct btree *btree, 
-//     enum btree_direct_comparator comparator, size_t offset)
-// {
-//     btree->direct_offset = offset;
-//     switch (comparator) {
-//     case BTREE_COMPARE_INTS: btree->search = scan_ints; break;
-//     case BTREE_COMPARE_U64S: btree->search = scan_u64s; break;
-//     case BTREE_COMPARE_I64S: btree->search = scan_i64s; break;
-//     case BTREE_COMPARE_DOUBLES: btree->search = scan_doubles; break;
-//     default: btree->search = node_bsearch; break;
-//     }
-// }
 
 static size_t node_size(struct btree *btree, bool leaf, size_t *items_offset) {
     size_t size = sizeof(struct node);
@@ -528,7 +463,7 @@ static void node_split(struct btree *btree, struct node *node,
 static enum mut_result node_set(struct btree *btree, struct node *node, 
     const void *item, uint64_t *hint, int depth) 
 {
-    dbg_check_node_is_writable(node);
+    dbg_assert(atomic_load(&node->rc) == 0);
     bool found = false;
     size_t i = btree_search(btree, node, item, &found, hint, depth);
     if (found) {
@@ -551,7 +486,7 @@ static enum mut_result node_set(struct btree *btree, struct node *node,
     } else if (result == NOMEM) {
         return NOMEM;
     }
-    // assert(result == MUST_SPLIT);
+    dbg_assert(result == MUST_SPLIT);
     if (node->num_items == btree->max_items) {
         return MUST_SPLIT;
     }
@@ -603,7 +538,7 @@ set:
     } else if (result == NOMEM) {
         goto oom;
     }
-    // assert(result == MUST_SPLIT);
+    dbg_assert(result == MUST_SPLIT);
     void *old_root = btree->root;
     struct node *new_root = node_new(btree, false);
     if (!new_root) goto oom;
@@ -655,8 +590,8 @@ static void node_rebalance(struct btree *btree, struct node *node, size_t i) {
     struct node *left = node->children[i];
     struct node *right = node->children[i+1];
 
-    dbg_check_node_is_writable(left);
-    dbg_check_node_is_writable(right);
+    dbg_assert(atomic_load(&left->rc)==0);
+    dbg_assert(atomic_load(&right->rc)==0);
 
     if (left->num_items + right->num_items < btree->max_items) {
         // Merges the left and right children nodes together as a single node
@@ -705,7 +640,7 @@ static enum mut_result node_delete(struct btree *btree,
     struct node *node, enum delact act, size_t index, const void *key, 
     void *prev, uint64_t *hint, int depth)
 {
-    dbg_check_node_is_writable(node);
+    dbg_assert(atomic_load(&node->rc)==0);
 
     size_t i = 0;
     bool found = false;
@@ -801,7 +736,7 @@ static void *btree_delete_x(struct btree *btree,
     } else if (result == NOMEM) {
         goto oom;
     }
-    // assert(result == DELETED);
+    dbg_assert(result == DELETED);
     if (btree->root->num_items == 0) {
         struct node *old_root = btree->root;
         if (!btree->root->leaf) {
