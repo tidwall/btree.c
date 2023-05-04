@@ -86,10 +86,10 @@ static void *spare_at(struct btree *btree, size_t index) {
 }
 
 #define NUM_SPARES       4
-#define SPARE_RETURN     spare_at(btree, 0) // returned btree_set btree_delete
-#define SPARE_NODE_COPY  spare_at(btree, 1) // for item_clone in node_copy
-#define SPARE_POP        spare_at(btree, 2) // for btree_delete pop
-#define SPARE_ITEM_CLONE spare_at(btree, 3) // for cloned inputs 
+#define SPARE_RETURN     spare_at((void*)btree, 0) // returned values
+#define SPARE_NODE_COPY  spare_at((void*)btree, 1) // item_clone in node_copy
+#define SPARE_POP        spare_at((void*)btree, 2) // btree_delete pop
+#define SPARE_ITEM_CLONE spare_at((void*)btree, 3) // cloned inputs 
 
 static void *get_item_at(struct btree *btree, struct node *node, size_t index) {
     return node->items+btree->elsize*index;
