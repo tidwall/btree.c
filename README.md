@@ -103,7 +103,7 @@ btree_count    # number of items in the btree
 btree_set      # insert or replace an existing item and return the previous
 btree_get      # get an existing item
 btree_delete   # delete and return an item
-btree_clone    # make an instant clone of the btree
+btree_clone    # make an clone of the btree using a copy-on-write technique
 ```
 
 ### Iteration
