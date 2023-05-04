@@ -498,7 +498,7 @@ static enum mut_result node_set(struct btree *btree, struct node *node,
     return node_set(btree, node, item, hint, depth);
 }
 
-static void *btree_set_x(struct btree *btree, const void *item, uint64_t *hint,
+static void *btree_set0(struct btree *btree, const void *item, uint64_t *hint,
     bool no_item_clone)
 {
     btree->oom = false;
@@ -562,7 +562,7 @@ oom:
     return NULL;
 }
 
-static const void *btree_get_x(const struct btree *btree, const void *key, 
+static const void *btree_get0(const struct btree *btree, const void *key, 
     uint64_t *hint)
 {
     struct node *node = btree->root;
@@ -715,7 +715,7 @@ static enum mut_result node_delete(struct btree *btree, struct node *node,
     return DELETED;
 }
 
-static void *btree_delete_x(struct btree *btree, enum delact act, size_t index,
+static void *btree_delete0(struct btree *btree, enum delact act, size_t index,
     const void *key, uint64_t *hint) 
 {
     btree->oom = false;
@@ -752,43 +752,93 @@ oom:
 const void *btree_set_hint(struct btree *btree, const void *item, 
     uint64_t *hint)
 {
-    return btree_set_x(btree, item, hint, false);
+    return btree_set0(btree, item, hint, false);
 }
 
 const void *btree_set(struct btree *btree, const void *item) {
-    return btree_set_x(btree, item, NULL, false);
+    return btree_set0(btree, item, NULL, false);
 }
 
 const void *btree_get_hint(const struct btree *btree, const void *key, 
     uint64_t *hint)
 {
-    return btree_get_x(btree, key, hint);
+    return btree_get0(btree, key, hint);
 }
 
 const void *btree_get(const struct btree *btree, const void *key) {
-    return btree_get_x(btree, key, NULL);
+    return btree_get0(btree, key, NULL);
 }
 
 const void *btree_delete_hint(struct btree *btree, const void *key, 
     uint64_t *hint)
 {
-    return btree_delete_x(btree, DELKEY, 0, key, hint);
+    return btree_delete0(btree, DELKEY, 0, key, hint);
 }
 
 const void *btree_delete(struct btree *btree, const void *key) {
-    return btree_delete_x(btree, DELKEY, 0, key, NULL);
+    return btree_delete0(btree, DELKEY, 0, key, NULL);
 }
 
 const void *btree_pop_min(struct btree *btree) {
-    return btree_delete_x(btree, POPFRONT, 0, NULL, NULL);
+    btree->oom = false;
+    if (btree->root) {
+        cow_node_or(btree->root, goto oom);
+        struct node *node = btree->root;
+        while (1) {
+            if (node->leaf) {
+                if (node->num_items > btree->min_items) {
+                    size_t i = 0;
+                    copy_item_into(btree, node, i, SPARE_RETURN);
+                    node_shift_left(btree, node, i, false);
+                    if (btree->item_free) {
+                        btree->item_free(SPARE_RETURN, btree->udata);
+                    }
+                    btree->count--;
+                    return SPARE_RETURN;
+                }
+                break;
+            }
+            cow_node_or(node->children[0], goto oom);
+            node = node->children[0];
+        }
+    }
+    return btree_delete0(btree, POPFRONT, 0, NULL, NULL);
+oom:
+    btree->oom = true;
+    return NULL;
 }
 
 const void *btree_pop_max(struct btree *btree) {
-    return btree_delete_x(btree, POPBACK, 0, NULL, NULL);
+    btree->oom = false;
+    if (btree->root) {
+        cow_node_or(btree->root, goto oom);
+        struct node *node = btree->root;
+        while (1) {
+            if (node->leaf) {
+                if (node->num_items > btree->min_items) {
+                    size_t i = node->num_items-1;
+                    copy_item_into(btree, node, i, SPARE_RETURN);
+                    node->num_items--;
+                    if (btree->item_free) {
+                        btree->item_free(SPARE_RETURN, btree->udata);
+                    }
+                    btree->count--;
+                    return SPARE_RETURN;
+                }
+                break;
+            }
+            cow_node_or(node->children[node->num_items], goto oom);
+            node = node->children[node->num_items];
+        }
+    }
+    return btree_delete0(btree, POPBACK, 0, NULL, NULL);
+oom:
+    btree->oom = true;
+    return NULL;
 }
 
 bool btree_oom(const struct btree *btree) {
-    return btree ? btree->oom : true;
+    return !btree || btree->oom;
 }
 
 size_t btree_count(const struct btree *btree) {
@@ -975,7 +1025,7 @@ const void *btree_max(const struct btree *btree) {
 const void *btree_load(struct btree *btree, const void *item) {
     btree->oom = false;
     if (!btree->root) {
-        return btree_set_x(btree, item, NULL, false);
+        return btree_set0(btree, item, NULL, false);
     }
     bool item_cloned = false;
     if (btree->item_clone) {
@@ -1000,7 +1050,7 @@ const void *btree_load(struct btree *btree, const void *item) {
         cow_node_or(node->children[node->num_items], goto oom);
         node = node->children[node->num_items];
     }
-    const void *prev = btree_set_x(btree, item, NULL, true);
+    const void *prev = btree_set0(btree, item, NULL, true);
     if (!btree->oom) return prev;
 oom:
     if (btree->item_free && item_cloned) {
