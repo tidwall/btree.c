@@ -19,65 +19,81 @@ static int compare_cstrs(const void *a, const void *b, void *udata) {
     return strcmp(*(char**)a, *(char**)b);
 }
 
+typedef int itype;
+
+itype make_itype(int i) {
+    return i;
+}
+
+int compare_itype_nudata(const void *a, const void *b) {
+    itype ia = *(itype*)a;
+    itype ib = *(itype*)b;
+    return ia < ib ? -1 : ia > ib;
+}
+
+int compare_itype(const void *a, const void *b, void *udata) {
+    return compare_itype_nudata(a, b);
+}
+
 int main() {
     int seed = getenv("SEED")?atoi(getenv("SEED")):time(NULL);
     int degree = getenv("DEGREE")?atoi(getenv("DEGREE")):128;
     int N = getenv("N")?atoi(getenv("N")):1000000;
     printf("seed=%d, degree=%d, count=%d, item_size=%zu\n", 
-        seed, degree, N, sizeof(int));
+        seed, degree, N, sizeof(itype));
     srand(seed);
 
     init_test_allocator(false);
 
-    int *vals = xmalloc(N * sizeof(int));
+    itype *vals = xmalloc(N * sizeof(itype));
     for (int i = 0; i < N; i++) {
-        vals[i] = i;
+        vals[i] = make_itype(i);
     }
 
-    shuffle(vals, N, sizeof(int));
+    shuffle(vals, N, sizeof(itype));
 
     struct btree *btree;
     uint64_t hint = 0;
 
-    btree = btree_new_for_test(sizeof(int), degree, compare_ints2, NULL);
-    qsort(vals, N, sizeof(int), compare_ints2_nudata);
+    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("load (seq)", N, {
         btree_load(btree, &vals[i]);
     })
     btree_free(btree);
 
-    shuffle(vals, N, sizeof(int));
-    btree = btree_new_for_test(sizeof(int), degree, compare_ints2, NULL);
+    shuffle(vals, N, sizeof(itype));
+    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
     bench("load (rand)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
     btree_free(btree);
 
 
-    btree = btree_new_for_test(sizeof(int), degree, compare_ints2, NULL);
-    qsort(vals, N, sizeof(int), compare_ints2_nudata);
+    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("set (seq)", N, {
         btree_set(btree, &vals[i]);
     })
     btree_free(btree);
 
     ////
-    qsort(vals, N, sizeof(int), compare_ints2_nudata);
-    btree = btree_new_for_test(sizeof(int), degree, compare_ints2, NULL);
+    qsort(vals, N, sizeof(itype), compare_itype_nudata);
+    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
     bench("set (seq-hint)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
     btree_free(btree);
 
     ////
-    shuffle(vals, N, sizeof(int));
-    btree = btree_new_for_test(sizeof(int), degree, compare_ints2, NULL);
+    shuffle(vals, N, sizeof(itype));
+    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
     bench("set (rand)", N, {
         btree_set(btree, &vals[i]);
     })
     
 
-    qsort(vals, N, sizeof(int), compare_ints2_nudata);
+    qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("get (seq)", N, {
         btree_get(btree, &vals[i]);
     })
@@ -86,17 +102,17 @@ int main() {
         btree_get_hint(btree, &vals[i], &hint);
     })
 
-    shuffle(vals, N, sizeof(int));
+    shuffle(vals, N, sizeof(itype));
     bench("get (rand)", N, {
-        btree_get(btree, &vals[i]);
+        assert(btree_get(btree, &vals[i]));
     })
 
 
-    shuffle(vals, N, sizeof(int));
+    shuffle(vals, N, sizeof(itype));
     bench("delete (rand)", N, {
         btree_delete(btree, &vals[i]);
     })
-    shuffle(vals, N, sizeof(int));
+    shuffle(vals, N, sizeof(itype));
     for (int i = 0; i < N; i++) {
         btree_set(btree, &vals[i]);
     }
@@ -125,7 +141,7 @@ int main() {
 
     // -- pop last items from tree -- 
     // reinsert
-    shuffle(vals, N, sizeof(int));
+    shuffle(vals, N, sizeof(itype));
     for (int i = 0; i < N; i++) {
         btree_set(btree, &vals[i]);
     }

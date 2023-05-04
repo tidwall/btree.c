@@ -32,7 +32,7 @@ static size_t align_size(size_t size) {
 
 static void degree_to_min_max(int deg, int *min, int *max) {
     if (deg <= 0) {
-        deg = 32;
+        deg = 128;
     } else if (deg == 1) {
         deg = 2; // must have at least 2
     }
@@ -65,8 +65,6 @@ struct btree {
     void *(*realloc)(void *, size_t);
     void (*free)(void *);
     int (*compare)(const void *a, const void *b, void *udata);
-    size_t (*search)(const struct btree *btree, struct node *node,
-        const void *key, bool *found);
     void *udata;
     struct node *root;
     size_t count;
@@ -281,7 +279,6 @@ struct btree *btree_new_with_allocator(
     btree->malloc = malloc_;
     btree->free = free_;
     btree->spare_elsize = spare_elsize;
-    btree->search = node_bsearch;
     return btree;
 }
 
@@ -421,7 +418,7 @@ static size_t btree_search(const struct btree *btree, struct node *node,
     const void *key, bool *found, uint64_t *hint, int depth) 
 {
     if (!hint) {
-        return btree->search(btree, node, key, found);
+        return node_bsearch(btree, node, key, found);
     }
     return node_bsearch_hint(btree, node, key, found, hint, depth);
 }
