@@ -11,14 +11,15 @@
 
 struct btree;
 
-struct btree *btree_new(size_t elsize, size_t degree,
+struct btree *btree_new(size_t elsize, size_t max_items,
     int (*compare)(const void *a, const void *b, void *udata),
     void *udata);
 struct btree *btree_new_with_allocator(
     void *(*malloc)(size_t), 
     void *(*realloc)(void *, size_t), 
     void (*free)(void*),
-    size_t elsize, size_t degree,
+    size_t elsize, 
+    size_t max_items,
     int (*compare)(const void *a, const void *b, void *udata),
     void *udata);
 void btree_set_item_callbacks(struct btree *btree,

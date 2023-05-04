@@ -30,28 +30,6 @@ static size_t align_size(size_t size) {
     return size;
 }
 
-static void degree_to_min_max(int deg, int *min, int *max) {
-    if (deg <= 0) {
-        deg = 128;
-    } else if (deg == 1) {
-        deg = 2; // must have at least 2
-    }
-    *max = deg*2 - 1; // max items per node. max children is +1
-    *min = *max / 2;
-}
-
-#ifdef __GNUC__
-#define btnoinline __attribute__ ((noinline))
-#else 
-#define btnoinline
-#endif
-
-// #ifdef TEST_DEBUG
-// #define dbg_assert(cond) assert(cond)
-// #else
-#define dbg_assert(cond)
-// #endif
-
 struct node {
     atomic_int rc;
     bool leaf;
@@ -65,18 +43,18 @@ struct btree {
     void *(*realloc)(void *, size_t);
     void (*free)(void *);
     int (*compare)(const void *a, const void *b, void *udata);
-    void *udata;
-    struct node *root;
-    size_t count;
-    size_t height;
-    size_t max_items;
-    size_t min_items;
-    size_t elsize;
     bool (*item_clone)(const void *item, void *into, void *udata);
     void (*item_free)(const void *item, void *udata);
-    bool oom;             // last SET was out of memory
-    size_t spare_elsize;  //
-    char spare_data[];    //
+    void *udata;          // user data
+    struct node *root;    // root node or NULL if empty tree
+    size_t count;         // number of items in tree
+    size_t height;        // height of tree from root to leaf
+    size_t max_items;     // max items allowed per node before needing split
+    size_t min_items;     // min items allowed per node before needing join
+    size_t elsize;        // size of user item
+    bool oom;             // last write operation failed due to no memory
+    size_t spare_elsize;  // size of each spare element. This is aligned
+    char spare_data[];    // spare element spaces for various operations
 };
 
 static void *spare_at(struct btree *btree, size_t index) {
@@ -194,8 +172,8 @@ static size_t node_bsearch(const struct btree *btree, struct node *node,
     return i;
 }
 
-static btnoinline int node_bsearch_hint(const struct btree *btree, 
-    struct node *node, const void *key, bool *found, uint64_t *hint, int depth) 
+static int node_bsearch_hint(const struct btree *btree, struct node *node, 
+    const void *key, bool *found, uint64_t *hint, int depth) 
 {
     int low = 0;
     int high = node->num_items-1;
@@ -256,24 +234,25 @@ struct btree *btree_new_with_allocator(
     void *(*realloc_)(void *, size_t), 
     void (*free_)(void*),
     size_t elsize, 
-    size_t degree,
+    size_t max_items,
     int (*compare)(const void *a, const void *b, void *udata),
     void *udata)
 {
     (void)realloc_; // realloc not used
     malloc_ = malloc_ ? malloc_ : _malloc ? _malloc : malloc;
     free_ = free_ ? free_ : _free ? _free : free;
-    int min_items, max_items;
-    degree_to_min_max(degree, &min_items, &max_items);
-
+    
+    // normalize max_items
     size_t spare_elsize;
     size_t size = btree_memsize(elsize, &spare_elsize);
     struct btree *btree = malloc_(size);
     if (!btree) return NULL;
     memset(btree, 0, size);
+    size_t deg = max_items/2;
+    deg = deg == 0 ? 128 : deg == 1 ? 2 : deg;
+    btree->max_items = deg*2 - 1; // max items per node. max children is +1
+    btree->min_items = btree->max_items / 2;    
     btree->compare = compare;
-    btree->min_items = min_items;
-    btree->max_items = max_items;
     btree->elsize = elsize;
     btree->udata = udata;
     btree->malloc = malloc_;
@@ -282,10 +261,10 @@ struct btree *btree_new_with_allocator(
     return btree;
 }
 
-struct btree *btree_new(size_t elsize, size_t degree,
+struct btree *btree_new(size_t elsize, size_t max_items,
     int (*compare)(const void *a, const void *b, void *udata), void *udata)
 {
-    return btree_new_with_allocator(NULL, NULL, NULL, elsize, degree,
+    return btree_new_with_allocator(NULL, NULL, NULL, elsize, max_items,
         compare, udata);
 }
 
@@ -328,8 +307,7 @@ static void node_free(struct btree *btree, struct node *node) {
     btree->free(node);
 }
 
-static btnoinline struct node *node_copy(struct btree *btree, struct node *node)
-{
+static struct node *node_copy(struct btree *btree, struct node *node) {
     struct node *node2 = node_new(btree, node->leaf);
     if (!node2) return NULL;
     node2->num_items = node->num_items;
@@ -456,7 +434,7 @@ static void node_split(struct btree *btree, struct node *node,
 static enum mut_result node_set(struct btree *btree, struct node *node, 
     const void *item, uint64_t *hint, int depth) 
 {
-    dbg_assert(atomic_load(&node->rc) == 0);
+    // assert(atomic_load(&node->rc) == 0);
     bool found = false;
     size_t i = btree_search(btree, node, item, &found, hint, depth);
     if (found) {
@@ -479,7 +457,7 @@ static enum mut_result node_set(struct btree *btree, struct node *node,
     } else if (result == NOMEM) {
         return NOMEM;
     }
-    dbg_assert(result == MUST_SPLIT);
+    // assert(result == MUST_SPLIT);
     if (node->num_items == btree->max_items) {
         return MUST_SPLIT;
     }
@@ -531,7 +509,7 @@ set:
     } else if (result == NOMEM) {
         goto oom;
     }
-    dbg_assert(result == MUST_SPLIT);
+    // assert(result == MUST_SPLIT);
     void *old_root = btree->root;
     struct node *new_root = node_new(btree, false);
     if (!new_root) goto oom;
@@ -583,8 +561,8 @@ static void node_rebalance(struct btree *btree, struct node *node, size_t i) {
     struct node *left = node->children[i];
     struct node *right = node->children[i+1];
 
-    dbg_assert(atomic_load(&left->rc)==0);
-    dbg_assert(atomic_load(&right->rc)==0);
+    // assert(atomic_load(&left->rc)==0);
+    // assert(atomic_load(&right->rc)==0);
 
     if (left->num_items + right->num_items < btree->max_items) {
         // Merges the left and right children nodes together as a single node
@@ -632,7 +610,7 @@ static enum mut_result node_delete(struct btree *btree, struct node *node,
     enum delact act, size_t index, const void *key, void *prev, uint64_t *hint,
     int depth)
 {
-    dbg_assert(atomic_load(&node->rc)==0);
+    // assert(atomic_load(&node->rc)==0);
     size_t i = 0;
     bool found = false;
     switch (act) {
@@ -725,7 +703,7 @@ static void *btree_delete0(struct btree *btree, enum delact act, size_t index,
     } else if (result == NOMEM) {
         goto oom;
     }
-    dbg_assert(result == DELETED);
+    // assert(result == DELETED);
     if (btree->root->num_items == 0) {
         struct node *old_root = btree->root;
         if (!btree->root->leaf) {

@@ -37,10 +37,10 @@ int compare_itype(const void *a, const void *b, void *udata) {
 
 int main() {
     int seed = getenv("SEED")?atoi(getenv("SEED")):time(NULL);
-    int degree = getenv("DEGREE")?atoi(getenv("DEGREE")):128;
+    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):256;
     int N = getenv("N")?atoi(getenv("N")):1000000;
-    printf("seed=%d, degree=%d, count=%d, item_size=%zu\n", 
-        seed, degree, N, sizeof(itype));
+    printf("seed=%d, max_items=%d, count=%d, item_size=%zu\n", 
+        seed, max_items, N, sizeof(itype));
     srand(seed);
 
     init_test_allocator(false);
@@ -55,7 +55,7 @@ int main() {
     struct btree *btree;
     uint64_t hint = 0;
 
-    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
     qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("load (seq)", N, {
         btree_load(btree, &vals[i]);
@@ -63,14 +63,14 @@ int main() {
     btree_free(btree);
 
     shuffle(vals, N, sizeof(itype));
-    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
     bench("load (rand)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
     btree_free(btree);
 
 
-    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
     qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("set (seq)", N, {
         btree_set(btree, &vals[i]);
@@ -79,7 +79,7 @@ int main() {
 
     ////
     qsort(vals, N, sizeof(itype), compare_itype_nudata);
-    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
     bench("set (seq-hint)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
@@ -87,7 +87,7 @@ int main() {
 
     ////
     shuffle(vals, N, sizeof(itype));
-    btree = btree_new_for_test(sizeof(itype), degree, compare_itype, NULL);
+    btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
     bench("set (rand)", N, {
         btree_set(btree, &vals[i]);
     })
