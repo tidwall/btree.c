@@ -1958,12 +1958,33 @@ static void test_basic() {
     }
 }
 
+char *commaize(unsigned int n) {
+    char s1[64];
+    char *s2 = malloc(64);
+    assert(s2);
+    memset(s2, 0, sizeof(64));
+    snprintf(s1, sizeof(s1), "%d", n);
+    int i = strlen(s1)-1; 
+    int j = 0;
+	while (i >= 0) {
+		if (j%3 == 0 && j != 0) {
+            memmove(s2+1, s2, strlen(s2)+1);
+            s2[0] = ',';
+		}
+        memmove(s2+1, s2, strlen(s2)+1);
+		s2[0] = s1[i];
+        i--;
+        j++;
+	}
+	return s2;
+}
+
 #define bench(name, N, code) {{ \
     if (strlen(name) > 0) { \
         printf("%-14s ", name); \
     } \
-    size_t tmem = total_mem; \
-    size_t tallocs = total_allocs; \
+    size_t tmem = (size_t)total_mem; \
+    size_t tallocs = (size_t)total_allocs; \
     uint64_t bytes = 0; \
     clock_t begin = clock(); \
     for (int i = 0; i < N; i++) { \
@@ -1973,25 +1994,22 @@ static void test_basic() {
     double elapsed_secs = (double)(end - begin) / CLOCKS_PER_SEC; \
     double bytes_sec = (double)bytes/elapsed_secs; \
     double ns_op = elapsed_secs/(double)N*1e9; \
-    if (ns_op < 10) { \
-        printf("%d ops in %.3f secs, %.1f ns/op, %.0f op/sec", \
-            N, elapsed_secs, ns_op, (double)N/elapsed_secs \
-        ); \
-    } else { \
-        printf("%d ops in %.3f secs, %.0f ns/op, %.0f op/sec", \
-            N, elapsed_secs, ns_op, (double)N/elapsed_secs \
-        ); \
-    } \
+    char *pops = commaize(N); \
+    char *psec = commaize((double)N/elapsed_secs); \
+    printf("%s ops in %.3f secs %6.1f ns/op %13s op/sec", \
+        pops, elapsed_secs, ns_op, psec); \
+    free(psec); \
+    free(pops); \
     if (bytes > 0) { \
-        printf(", %.1f GB/sec", bytes_sec/1024/1024/1024); \
+        printf(" %.1f GB/sec", bytes_sec/1024/1024/1024); \
     } \
-    if (total_mem > tmem) { \
-        size_t used_mem = total_mem-tmem; \
-        printf(", %.2f bytes/op", (double)used_mem/N); \
+    if ((size_t)total_mem > tmem) { \
+        size_t used_mem = (size_t)total_mem-tmem; \
+        printf(" %5.2f bytes/op", (double)used_mem/N); \
     } \
-    if (total_allocs > tallocs) { \
-        size_t used_allocs = total_allocs-tallocs; \
-        printf(", %.2f allocs/op", (double)used_allocs/N); \
+    if ((size_t)total_allocs > tallocs) { \
+        size_t used_allocs = (size_t)total_allocs-tallocs; \
+        printf(" %5.2f allocs/op", (double)used_allocs/N); \
     } \
     printf("\n"); \
 }}
