@@ -25,8 +25,6 @@ void test_clone_items_withcallbacks(bool withcallbacks) {
     struct pair *pairs;
     while (!(pairs = xmalloc(sizeof(struct pair) * N)));
 
-
-
     for (size_t i = 0; i < N; i++) {
         pairs[i].key = i;
         pairs[i].val = 0;
@@ -374,8 +372,6 @@ void *thdwork(void *tdata) {
     assert(objscp);
     for (int i = 0; i < NOBJS; i++) {
         objscp[i] = cobj_clone(objs[i]);
-        // printf("%s\n", objscp[i]->key);
-        // printf("%s\n", objscp[i]->val);
     }
     objs = objscp;
     assert(!pthread_mutex_lock(mu));
@@ -403,8 +399,9 @@ void *thdwork(void *tdata) {
     assert(btree_count(btree) == (size_t)NOBJS/2);
 
 
-    btree_free(btree);
 
+
+    btree_free(btree);
     for (int i = 0; i < NOBJS; i++) {
         cobj_free(objs[i]);
     }
@@ -478,10 +475,10 @@ void test_clone_threads(void) {
     
     // Now we have NCLONES number of independent btrees
     // Let's delete the original objs array.
-    // for (int i = 0; i < NOBJS; i++) {
-    //     cobj_free(objs[i]);
-    // }
-    // xfree(objs);
+    for (int i = 0; i < NOBJS; i++) {
+        cobj_free(objs[i]);
+    }
+    xfree(objs);
 
     // Let's check if we can still access all of the original objects
     // stored in the btree.
@@ -503,14 +500,14 @@ void test_clone_threads(void) {
 
     btree_free(btree2);
 
-    for (int i = 0; i < NOBJS; i++) {
-        cobj_free(objs[i]);
-    }
-    xfree(objs);
+    // for (int i = 0; i < NOBJS; i++) {
+    //     cobj_free(objs[i]);
+    // }
+    // xfree(objs);
 }
 
 
-void test_clone_deletes_withcallbacks(bool withcallbacks) {
+void test_clone_delete_withcallbacks(bool withcallbacks) {
     
     size_t N = 10000;
     struct pair *pairs;
@@ -569,21 +566,95 @@ void test_clone_deletes_withcallbacks(bool withcallbacks) {
     xfree(pairs);
 }
 
-void test_clone_deletes(void) {
-    test_clone_deletes_withcallbacks(true);
+void test_clone_delete(void) {
+    test_clone_delete_withcallbacks(true);
 }
 
-void test_clone_deletes_nocallbacks(void) {
-    test_clone_deletes_withcallbacks(false);
+void test_clone_delete_nocallbacks(void) {
+    test_clone_delete_withcallbacks(false);
 }
+
+void test_clone_pop_withcallbacks(bool withcallbacks) {
+    size_t N = 10000;
+    struct pair *pairs;
+    while (!(pairs = xmalloc(sizeof(struct pair) * N)));
+
+    for (size_t i = 0; i < N; i++) {
+        pairs[i].key = i;
+        pairs[i].val = 0;
+    }
+    
+    shuffle(pairs, N, sizeof(struct pair));
+
+    struct btree *btree1; 
+    
+    while(!(btree1 = btree_new_for_test(sizeof(struct pair), 4, 
+        compare_pairs, nothing)));
+    if (withcallbacks) {
+        btree_set_item_callbacks(btree1, pair_clone, pair_free);
+    }
+    for (size_t i = 0; i < N; i++) {
+        const void *v;
+        struct btree *btree = btree1;
+        OOM_WAIT( { v = btree_load(btree, &pairs[i]); } );
+        assert(!v);
+    }
+    assert(btree_sane(btree1));
+
+    struct btree *btree2;
+    while(!(btree2 = btree_clone(btree1)));
+
+    assert(btree_count(btree1) == N);
+    assert(btree_sane(btree1));
+    assert(btree_count(btree2) == N);
+    assert(btree_sane(btree2));
+
+    shuffle(pairs, N, sizeof(struct pair));
+    for (size_t i = 0; i < N; i++) {
+        const void *v;
+        struct btree *btree = btree1;
+        OOM_WAIT( { v = btree_pop_min(btree); } );
+        assert(v && ((struct pair*)v)->key == (int)i);
+        assert(btree_sane(btree));
+        assert(btree_count(btree) == N-i-1);
+    }
+
+    btree_free(btree1);
+    while(!(btree1 = btree_clone(btree2)));
+    shuffle(pairs, N, sizeof(struct pair));
+    for (size_t i = 0; i < N; i++) {
+        const void *v;
+        struct btree *btree = btree2; // this is needed for OOM_WAIT;
+        OOM_WAIT( { v = btree_pop_max(btree); } );
+        assert(v && ((struct pair*)v)->key == (int)(N-i-1));
+        assert(btree_sane(btree));
+        assert(btree_count(btree) == N-i-1);
+    }
+
+    btree_free(btree1);
+    btree_free(btree2);
+    xfree(pairs);
+}
+
+void test_clone_pop(void) {
+    test_clone_pop_withcallbacks(true);
+}
+
+void test_clone_pop_nocallbacks(void) {
+    test_clone_pop_withcallbacks(false);
+}
+
+
 
 int main(int argc, char **argv) {
     do_chaos_test(test_clone_items);
     do_chaos_test(test_clone_items_nocallbacks);
     do_chaos_test(test_clone_pairs_diverge);
     do_chaos_test(test_clone_pairs_diverge_nocallbacks);
-    do_chaos_test(test_clone_deletes);
-    do_chaos_test(test_clone_deletes_nocallbacks);
+    do_chaos_test(test_clone_delete);
+    do_chaos_test(test_clone_delete_nocallbacks);
+    do_chaos_test(test_clone_pop);
+    do_chaos_test(test_clone_pop_nocallbacks);
     do_test(test_clone_threads);
     return 0;
 }

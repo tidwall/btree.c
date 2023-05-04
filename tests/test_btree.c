@@ -206,9 +206,6 @@ void test_btree_operations(void) {
         }
     }
 
-
-
-
     // pop-min
     for (int i = 0; i < N; i++) {
         const int *v;
