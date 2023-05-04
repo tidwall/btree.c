@@ -4,11 +4,12 @@ A B-tree implementation in C.
 
 ## Features
 
-- Generic interface with support for variable sized items.
+- Generic interface with support for variable sized items
 - Fast sequential bulk loading
-- ANSI C (C99)
+- Copy-on-write support
+- ANSI C (C17)
 - Supports custom allocators
-- Pretty darn good performance. 🚀
+- Pretty darn good performance 🚀
 
 ## Example
 
@@ -102,6 +103,7 @@ btree_count    # number of items in the btree
 btree_set      # insert or replace an existing item and return the previous
 btree_get      # get an existing item
 btree_delete   # delete and return an item
+btree_clone    # make an instant clone of the btree
 ```
 
 ### Iteration
@@ -126,30 +128,35 @@ btree_max      # return the last item in the btree
 btree_load     # same as btree_set but optimized for fast loading, 10x boost.
 ```
 
+*See [btree.h](btree.h) for info on all available functions.
+
 ## Testing and benchmarks
 
 ```sh
-$ cc -DBTREE_TEST btree.c && ./a.out              # run tests
-$ cc -DBTREE_TEST -O3 btree.c && BENCH=1 ./a.out  # run benchmarks
+$ tests/run.sh        # run tests
+$ tests/run.sh bench  # run benchmarks
 ```
 
-The following benchmarks were run on my 2019 Macbook Pro (2.4 GHz 8-Core Intel Core i9) using gcc-9.
+The following benchmarks were run on my 2021 Apple M1 Max using gcc-12.
 The items are simple 4-byte ints.
 
 ```
-load (seq)     1000000 ops in 0.010 secs, 10 ns/op, 98000784 op/sec, 6.92 bytes/op, 0.01 allocs/op
-set (seq)      1000000 ops in 0.069 secs, 69 ns/op, 14459434 op/sec, 8.29 bytes/op, 0.01 allocs/op
-get (seq)      1000000 ops in 0.065 secs, 65 ns/op, 15369010 op/sec
-load (rand)    1000000 ops in 0.212 secs, 212 ns/op, 4718740 op/sec, 5.94 bytes/op, 0.01 allocs/op
-set (rand)     1000000 ops in 0.175 secs, 175 ns/op, 5726065 op/sec, 5.88 bytes/op, 0.01 allocs/op
-get (rand)     1000000 ops in 0.163 secs, 163 ns/op, 6125687 op/sec
-delete (rand)  1000000 ops in 0.177 secs, 177 ns/op, 5644647 op/sec
-set (seq-hint) 1000000 ops in 0.034 secs, 34 ns/op, 29140076 op/sec, 8.29 bytes/op, 0.01 allocs/op
-get (seq-hint) 1000000 ops in 0.053 secs, 53 ns/op, 18774054 op/sec
-min            1000000 ops in 0.001 secs, 1 ns/op, 709723208 op/sec
-max            1000000 ops in 0.002 secs, 2 ns/op, 611995104 op/sec
-pop-min        1000000 ops in 0.035 secs, 35 ns/op, 28408284 op/sec
-pop-max        1000000 ops in 0.023 secs, 23 ns/op, 42607584 op/sec
+seed=1683231129, max_items=256, count=1000000, item_size=4
+load (seq)     1,000,000 ops in 0.010 secs   10.5 ns/op    95,419,847 op/sec  8.32 bytes/op  0.01 allocs/op
+load (rand)    1,000,000 ops in 0.175 secs  175.1 ns/op     5,709,457 op/sec  5.92 bytes/op  0.01 allocs/op
+set (seq)      1,000,000 ops in 0.080 secs   80.3 ns/op    12,452,524 op/sec  8.32 bytes/op  0.01 allocs/op
+set (seq-hint) 1,000,000 ops in 0.025 secs   24.8 ns/op    40,309,577 op/sec  8.32 bytes/op  0.01 allocs/op
+set (rand)     1,000,000 ops in 0.165 secs  165.0 ns/op     6,059,210 op/sec  5.93 bytes/op  0.01 allocs/op
+get (seq)      1,000,000 ops in 0.081 secs   80.5 ns/op    12,421,588 op/sec
+get (seq-hint) 1,000,000 ops in 0.088 secs   87.5 ns/op    11,426,220 op/sec
+get (rand)     1,000,000 ops in 0.117 secs  116.9 ns/op     8,555,271 op/sec
+delete (rand)  1,000,000 ops in 0.148 secs  147.6 ns/op     6,774,792 op/sec
+min            1,000,000 ops in 0.001 secs    1.3 ns/op   797,448,165 op/sec
+max            1,000,000 ops in 0.002 secs    1.7 ns/op   579,710,144 op/sec
+ascend         1,000,000 ops in 0.001 secs    1.0 ns/op 1,018,329,938 op/sec
+descend        1,000,000 ops in 0.001 secs    1.0 ns/op 1,040,582,726 op/sec
+pop-min        1,000,000 ops in 0.028 secs   27.7 ns/op    36,039,932 op/sec
+pop-max        1,000,000 ops in 0.018 secs   17.7 ns/op    56,404,760 op/sec
 ```
 
 ## License
