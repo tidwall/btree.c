@@ -3,6 +3,8 @@
 
 #include <unistd.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
@@ -45,7 +47,7 @@ static int64_t seed = 0;
     if (argc < 2 || strstr(#name, argv[1])) { \
         if ((trand)) { \
             seed = getenv("SEED")?atoi(getenv("SEED")):crand(); \
-            printf("SEED=%lld\n", seed); \
+            printf("SEED=%" PRId64 "\n", seed); \
             srand(seed); \
         } else { \
             seedrand(); \
