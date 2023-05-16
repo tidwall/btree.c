@@ -180,7 +180,7 @@ static int node_bsearch_hint(const struct btree *btree, struct node *node,
     if (hint && depth < 8) {
         size_t index = (size_t)((uint8_t*)hint)[depth];
         if (index > 0) {
-            if (index > node->num_items-1) {
+            if (index > (size_t)(node->num_items-1)) {
                 index = node->num_items-1;
             }
             void *item = get_item_at((void*)btree, node, (size_t)index);
@@ -251,6 +251,10 @@ struct btree *btree_new_with_allocator(
     size_t deg = max_items/2;
     deg = deg == 0 ? 128 : deg == 1 ? 2 : deg;
     btree->max_items = deg*2 - 1; // max items per node. max children is +1
+    if (btree->max_items > 2045) {
+        // there must be a reasonable limit.
+        btree->max_items = 2045;
+    }
     btree->min_items = btree->max_items / 2;    
     btree->compare = compare;
     btree->elsize = elsize;
@@ -294,7 +298,7 @@ static struct node *node_new(struct btree *btree, bool leaf) {
 static void node_free(struct btree *btree, struct node *node) {
     if (atomic_fetch_sub(&node->rc, 1) > 0) return;
     if (!node->leaf) {
-        for (size_t i = 0; i < node->num_items+1; i++) {
+        for (size_t i = 0; i < (size_t)(node->num_items+1); i++) {
             node_free(btree, node->children[i]);
         }
     }
@@ -313,7 +317,7 @@ static struct node *node_copy(struct btree *btree, struct node *node) {
     node2->num_items = node->num_items;
     size_t items_cloned = 0;
     if (!node2->leaf) {
-        for (size_t i = 0; i < node2->num_items+1; i++) {
+        for (size_t i = 0; i < (size_t)(node2->num_items+1); i++) {
             node2->children[i] = node->children[i];
             atomic_fetch_add(&node2->children[i]->rc, 1);
         }
@@ -336,7 +340,7 @@ static struct node *node_copy(struct btree *btree, struct node *node) {
     return node2;
 failed:
     if (!node2->leaf) {
-        for (size_t i = 0; i < node2->num_items+1; i++) {
+        for (size_t i = 0; i < (size_t)(node2->num_items+1); i++) {
             atomic_fetch_sub(&node2->children[i]->rc, 1);
         }
     }
