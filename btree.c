@@ -3,11 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-#include <stdint.h>
-#include <stdatomic.h>
-#include <assert.h>
 #include "btree.h"
 
 static void *(*_malloc)(size_t) = NULL;
@@ -30,8 +26,37 @@ static size_t align_size(size_t size) {
     return size;
 }
 
+#ifdef BTREE_NOATOMICS
+typedef int rc_t;
+static int rc_load(rc_t *ptr) {
+    return *ptr;
+}
+static int rc_fetch_sub(rc_t *ptr, int val) {
+    int rc = *ptr;
+    *ptr -= val;
+    return rc;
+}
+static int rc_fetch_add(rc_t *ptr, int val) {
+    int rc = *ptr;
+    *ptr += val;
+    return rc;
+}
+#else 
+#include <stdatomic.h>
+typedef atomic_int rc_t;
+static int rc_load(rc_t *ptr) {
+    return atomic_load(ptr);
+}
+static int rc_fetch_sub(rc_t *ptr, int delta) {
+    return atomic_fetch_sub(ptr, delta);
+}
+static int rc_fetch_add(rc_t *ptr, int delta) {
+    return atomic_fetch_add(ptr, delta);
+}
+#endif
+
 struct node {
-    atomic_int rc;
+    rc_t rc;
     bool leaf;
     size_t num_items:16;
     char *items;
@@ -296,7 +321,7 @@ static struct node *node_new(struct btree *btree, bool leaf) {
 }
 
 static void node_free(struct btree *btree, struct node *node) {
-    if (atomic_fetch_sub(&node->rc, 1) > 0) return;
+    if (rc_fetch_sub(&node->rc, 1) > 0) return;
     if (!node->leaf) {
         for (size_t i = 0; i < (size_t)(node->num_items+1); i++) {
             node_free(btree, node->children[i]);
@@ -319,7 +344,7 @@ static struct node *node_copy(struct btree *btree, struct node *node) {
     if (!node2->leaf) {
         for (size_t i = 0; i < (size_t)(node2->num_items+1); i++) {
             node2->children[i] = node->children[i];
-            atomic_fetch_add(&node2->children[i]->rc, 1);
+            rc_fetch_add(&node2->children[i]->rc, 1);
         }
     }
     if (btree->item_clone) {
@@ -341,7 +366,7 @@ static struct node *node_copy(struct btree *btree, struct node *node) {
 failed:
     if (!node2->leaf) {
         for (size_t i = 0; i < (size_t)(node2->num_items+1); i++) {
-            atomic_fetch_sub(&node2->children[i]->rc, 1);
+            rc_fetch_sub(&node2->children[i]->rc, 1);
         }
     }
     if (btree->item_free) {
@@ -355,10 +380,10 @@ failed:
 }
 
 #define cow_node_or(bnode, code) { \
-    if (atomic_load(&(bnode)->rc) > 0) { \
+    if (rc_load(&(bnode)->rc) > 0) { \
         struct node *node2 = node_copy(btree, (bnode)); \
         if (!node2) { code; } \
-        atomic_fetch_sub(&(bnode)->rc, 1); \
+        rc_fetch_sub(&(bnode)->rc, 1); \
         (bnode) = node2; \
     } \
 }
@@ -392,7 +417,7 @@ struct btree *btree_clone(struct btree *btree) {
     struct btree *btree2 = btree->malloc(size);
     if (!btree2) return NULL;
     memcpy(btree2, btree, size);
-    if (btree2->root) atomic_fetch_add(&btree2->root->rc, 1);
+    if (btree2->root) rc_fetch_add(&btree2->root->rc, 1);
     return btree2;
 }
 
@@ -438,7 +463,7 @@ static void node_split(struct btree *btree, struct node *node,
 static enum mut_result node_set(struct btree *btree, struct node *node, 
     const void *item, uint64_t *hint, int depth) 
 {
-    // assert(atomic_load(&node->rc) == 0);
+    // assert(rc_load(&node->rc) == 0);
     bool found = false;
     size_t i = btree_search(btree, node, item, &found, hint, depth);
     if (found) {
@@ -565,8 +590,8 @@ static void node_rebalance(struct btree *btree, struct node *node, size_t i) {
     struct node *left = node->children[i];
     struct node *right = node->children[i+1];
 
-    // assert(atomic_load(&left->rc)==0);
-    // assert(atomic_load(&right->rc)==0);
+    // assert(rc_load(&left->rc)==0);
+    // assert(rc_load(&right->rc)==0);
 
     if (left->num_items + right->num_items < btree->max_items) {
         // Merges the left and right children nodes together as a single node
@@ -614,7 +639,7 @@ static enum mut_result node_delete(struct btree *btree, struct node *node,
     enum delact act, size_t index, const void *key, void *prev, uint64_t *hint,
     int depth)
 {
-    // assert(atomic_load(&node->rc)==0);
+    // assert(rc_load(&node->rc)==0);
     size_t i = 0;
     bool found = false;
     switch (act) {

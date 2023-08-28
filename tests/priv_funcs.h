@@ -1,5 +1,8 @@
 #ifdef TEST_PRIVATE_FUNCTIONS
 
+#include <stdio.h>
+#include <assert.h>
+
 static void node_print(struct btree *btree, struct node *node, 
     void (*print)(void *), size_t depth) 
 {
