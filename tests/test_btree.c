@@ -461,6 +461,13 @@ void test_btree_various(void) {
     assert(btree_sane(btree));
     btree_free(btree);
 
+    btree = btree_new(sizeof(int), 9999, compare_ints, nothing);
+    for (int i = 0; i < 100000; i++) assert(!btree_set(btree, &i));
+    for (int i = 0; i < 100000; i++) assert(btree_get(btree, &i));
+    assert(btree_height(btree) == 2);
+    assert(btree_sane(btree));
+    btree_free(btree);
+
 }
 
 void pair_print(void *item) {
