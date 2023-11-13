@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-static void node_print(struct btree *btree, struct node *node, 
+static void node_print(struct btree *btree, struct btree_node *node, 
     void (*print)(void *), size_t depth) 
 {
     // for (size_t i = 0; i < depth; i++) {
@@ -19,7 +19,7 @@ static void node_print(struct btree *btree, struct node *node,
             if (i > 0) {
                 printf(" ");
             }
-            print(get_item_at(btree, node, i));
+            print(btree_get_item_at(btree, node, i));
         }
         printf("]\n");
     } else {
@@ -28,7 +28,7 @@ static void node_print(struct btree *btree, struct node *node,
             for (size_t j = 0; j < depth; j++) {
                 printf("  ");
             }
-            print(get_item_at(btree, node, i));
+            print(btree_get_item_at(btree, node, i));
             printf("\n");
         }
         node_print(btree, node->children[node->num_items], print, depth+1);
@@ -42,17 +42,17 @@ void btree_print(struct btree *btree, void (*print)(void *item)) {
     }
 }
 
-static void node_walk(const struct btree *btree, struct node *node, 
+static void node_walk(const struct btree *btree, struct btree_node *node, 
     void (*fn)(const void *item, void *udata), void *udata) 
 {
     if (node->leaf) {
         for (size_t i = 0; i < node->num_items; i++) {
-            fn(get_item_at((void*)btree, node, i), udata);
+            fn(btree_get_item_at((void*)btree, node, i), udata);
         }
     } else {
         for (size_t i = 0; i < node->num_items; i++) {
             node_walk(btree, node->children[i], fn, udata);
-            fn(get_item_at((void*)btree, node, i), udata);
+            fn(btree_get_item_at((void*)btree, node, i), udata);
         }
         node_walk(btree, node->children[node->num_items], fn, udata);
     }
@@ -67,7 +67,7 @@ void btree_walk(const struct btree *btree,
     }
 }
 
-static size_t node_deepcount(struct node *node) {
+static size_t node_deepcount(struct btree_node *node) {
     size_t count = node->num_items;
     if (!node->leaf) {
         for (size_t i = 0; i <= node->num_items; i++) {
@@ -85,7 +85,7 @@ static size_t btree_deepcount(const struct btree *btree) {
     return 0;
 }
 
-static bool node_saneheight(struct node *node, int height, 
+static bool node_saneheight(struct btree_node *node, int height, 
     int maxheight)
 {
     if (node->leaf) {
@@ -116,7 +116,7 @@ static bool btree_saneheight(const struct btree *btree) {
 }
 
 static bool node_saneprops(const struct btree *btree, 
-    struct node *node, int height)
+    struct btree_node *node, int height)
 {
     if (height == 1) {
         if (node->num_items < 1 || node->num_items > btree->max_items) {
@@ -164,7 +164,7 @@ static void sane_walk(const void *item, void *udata) {
         return;
     }
     if (ctx->last != NULL) {
-        if (btcompare(ctx->btree, ctx->last, item) >= 0) {
+        if (btree_compare(ctx->btree, ctx->last, item) >= 0) {
             ctx->bad = true;
             return;
         }
