@@ -7,7 +7,7 @@ A B-tree implementation in C.
 - Generic interface with support for variable sized items
 - Fast sequential bulk loading
 - Copy-on-write support
-- ANSI C (C17)
+- Supports C99 and up
 - Supports custom allocators
 - 100% code coverage
 - Pretty darn good performance 🚀
