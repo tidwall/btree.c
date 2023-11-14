@@ -186,7 +186,6 @@ bool btree_descend_hint(const struct btree *btree, const void *pivot,
 // DEPRECATED: use `btree_new_with_allocator`
 void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*));
 
-
 struct btree_iter *btree_iter_new(const struct btree *btree);
 void btree_iter_free(struct btree_iter *iter);
 bool btree_iter_first(struct btree_iter *iter);

@@ -100,7 +100,7 @@ static void *btree_spare_at(const struct btree *btree, size_t index) {
 #define BTREE_NSPARES 4
 #define BTREE_SPARE_RETURN btree_spare_at(btree, 0) // returned values
 #define BTREE_SPARE_NODE   btree_spare_at(btree, 1) // clone in btree_node_copy
-#define BTREE_SPARE_POP    btree_spare_at(btree, 2) // btree_delete pop
+#define BTREE_SPARE_POPMAX btree_spare_at(btree, 2) // btree_delete popmax
 #define BTREE_SPARE_CLONE  btree_spare_at(btree, 3) // cloned inputs 
 
 static void *btree_get_item_at(struct btree *btree, struct btree_node *node, 
@@ -135,12 +135,10 @@ static void btree_node_shift_right(struct btree *btree, struct btree_node *node,
 {
     size_t num_items_to_shift = node->nitems - index;
     memmove(node->items+btree->elsize*(index+1), 
-            node->items+btree->elsize*index,
-            num_items_to_shift*btree->elsize);
+        node->items+btree->elsize*index, num_items_to_shift*btree->elsize);
     if (!node->leaf) {
-        memmove(&node->children[index+1],
-                &node->children[index],
-                (num_items_to_shift+1)*sizeof(struct btree_node*));
+        memmove(&node->children[index+1], &node->children[index],
+            (num_items_to_shift+1)*sizeof(struct btree_node*));
     }
     node->nitems++;
 }
@@ -150,15 +148,13 @@ static void btree_node_shift_left(struct btree *btree, struct btree_node *node,
 {
     size_t num_items_to_shift = node->nitems - index - 1;
     memmove(node->items+btree->elsize*index, 
-            node->items+btree->elsize*(index+1),
-            num_items_to_shift*btree->elsize);
+        node->items+btree->elsize*(index+1), num_items_to_shift*btree->elsize);
     if (!node->leaf) {
         if (for_merge) {
             index++;
         }
-        memmove(&node->children[index],
-                &node->children[index+1],
-                (num_items_to_shift+1)*sizeof(struct btree_node*));
+        memmove(&node->children[index], &node->children[index+1],
+            (num_items_to_shift+1)*sizeof(struct btree_node*));
     }
     node->nitems--;
 }
@@ -167,19 +163,17 @@ static void btree_copy_item(struct btree *btree, struct btree_node *node_a,
     size_t index_a, struct btree_node *node_b, size_t index_b) 
 {
     memcpy(btree_get_item_at(btree, node_a, index_a), 
-           btree_get_item_at(btree, node_b, index_b), 
-           btree->elsize);
+        btree_get_item_at(btree, node_b, index_b), btree->elsize);
 }
 
 static void btree_node_join(struct btree *btree, struct btree_node *left,
     struct btree_node *right)
 {
     memcpy(left->items+btree->elsize*left->nitems, right->items,
-           right->nitems*btree->elsize);
+        right->nitems*btree->elsize);
     if (!left->leaf) {
-        memcpy(&left->children[left->nitems],
-               &right->children[0],
-               (right->nitems+1)*sizeof(struct btree_node*));
+        memcpy(&left->children[left->nitems], &right->children[0],
+            (right->nitems+1)*sizeof(struct btree_node*));
     }
     left->nitems += right->nitems;
 }
@@ -288,7 +282,9 @@ struct btree *btree_new_with_allocator(
     size_t spare_elsize;
     size_t size = btree_memsize(elsize, &spare_elsize);
     struct btree *btree = malloc_(size);
-    if (!btree) return NULL;
+    if (!btree) {
+        return NULL;
+    }
     memset(btree, 0, size);
     size_t deg = max_items/2;
     deg = deg == 0 ? 128 : deg == 1 ? 2 : deg;
@@ -333,7 +329,9 @@ static struct btree_node *btree_node_new(struct btree *btree, bool leaf) {
     size_t items_offset;
     size_t size = btree_node_size(btree, leaf, &items_offset);
     struct btree_node *node = btree->malloc(size);
-    if (!node) return NULL;
+    if (!node) {
+        return NULL;
+    }
     memset(node, 0, size);
     node->leaf = leaf;
     node->items = (char*)node+items_offset;
@@ -341,7 +339,9 @@ static struct btree_node *btree_node_new(struct btree *btree, bool leaf) {
 }
 
 static void btree_node_free(struct btree *btree, struct btree_node *node) {
-    if (btree_rc_fetch_sub(&node->rc, 1) > 0) return;
+    if (btree_rc_fetch_sub(&node->rc, 1) > 0) {
+        return;
+    }
     if (!node->leaf) {
         for (size_t i = 0; i < (size_t)(node->nitems+1); i++) {
             btree_node_free(btree, node->children[i]);
@@ -360,7 +360,9 @@ static struct btree_node *btree_node_copy(struct btree *btree,
     struct btree_node *node)
 {
     struct btree_node *node2 = btree_node_new(btree, node->leaf);
-    if (!node2) return NULL;
+    if (!node2) {
+        return NULL;
+    }
     node2->nitems = node->nitems;
     size_t items_cloned = 0;
     if (!node2->leaf) {
@@ -438,10 +440,14 @@ void btree_set_item_callbacks(struct btree *btree,
 
 BTREE_EXTERN
 struct btree *btree_clone(struct btree *btree) {
-    if (!btree) return NULL;
+    if (!btree) {
+        return NULL;
+    }
     size_t size = btree_memsize(btree->elsize, NULL);
     struct btree *btree2 = btree->malloc(size);
-    if (!btree2) return NULL;
+    if (!btree2) {
+        return NULL;
+    }
     memcpy(btree2, btree, size);
     if (btree2->root) btree_rc_fetch_add(&btree2->root->rc, 1);
     return btree2;
@@ -457,28 +463,27 @@ static size_t btree_search(const struct btree *btree, struct btree_node *node,
 }
 
 enum btree_mut_result { 
-    BTREE_NOCHANGE   = 0,
-    BTREE_INSERTED   = 1,
-    BTREE_MUST_SPLIT = 2,
-    BTREE_REPLACED   = 3,
-    BTREE_NOMEM      = 4,
-    BTREE_DELETED    = 5,
-    // BTREE_INSERTED or BTREE_REPLACED or BTREE_DELETED can be checked 
-    // with (res&1)
+    BTREE_NOCHANGE,
+    BTREE_NOMEM,
+    BTREE_MUST_SPLIT,
+    BTREE_INSERTED,
+    BTREE_REPLACED,
+    BTREE_DELETED,
 };
 
 static void btree_node_split(struct btree *btree, struct btree_node *node,
     struct btree_node **right, void **median) 
 {
     *right = btree_node_new(btree, node->leaf);
-    if (!*right) return; // NOMEM
+    if (!*right) {
+        return; // NOMEM
+    }
     int mid = (int)(btree->max_items)/2;
     *median = btree_get_item_at(btree, node, (size_t)mid);
     (*right)->leaf = node->leaf;
     (*right)->nitems = node->nitems-((short)mid+1);
-    memmove((*right)->items,
-            node->items+(int)btree->elsize*(mid+1),
-            (size_t)(*right)->nitems*btree->elsize);
+    memmove((*right)->items, node->items+(int)btree->elsize*(mid+1),
+        (size_t)(*right)->nitems*btree->elsize);
     if (!node->leaf) {
         for (size_t i = 0; i <= (*right)->nitems; i++) {
             (*right)->children[i] = node->children[mid+1+i];
@@ -507,11 +512,12 @@ static enum btree_mut_result btree_node_set(struct btree *btree,
     btree_cow_node_or(node->children[i], return BTREE_NOMEM);
     enum btree_mut_result result = btree_node_set(btree, node->children[i],
         item, hint, depth+1);
-    if (result&1) { // if (INSERTED or REPLACED)
+    if (result == BTREE_INSERTED || result == BTREE_REPLACED) {
         return result;
     } else if (result == BTREE_NOMEM) {
         return BTREE_NOMEM;
     }
+    // Split the child node
     if (node->nitems == btree->max_items) {
         return BTREE_MUST_SPLIT;
     }
@@ -541,7 +547,9 @@ static void *btree_set0(struct btree *btree, const void *item, uint64_t *hint,
     }
     if (!btree->root) {
         btree->root = btree_node_new(btree, true);
-        if (!btree->root) goto oom;
+        if (!btree->root) {
+            goto oom;
+        }
         btree_set_item_at(btree, btree->root, 0, item);
         btree->root->nitems = 1;
         btree->count++;
@@ -565,7 +573,9 @@ set:
     }
     void *old_root = btree->root;
     struct btree_node *new_root = btree_node_new(btree, false);
-    if (!new_root) goto oom;
+    if (!new_root) {
+        goto oom;
+    }
     struct btree_node *right = NULL;
     void *median = NULL;
     btree_node_split(btree, old_root, &right, &median);
@@ -594,13 +604,19 @@ static const void *btree_get0(const struct btree *btree, const void *key,
     uint64_t *hint)
 {
     struct btree_node *node = btree->root;
-    if (!node) return NULL;
+    if (!node) {
+        return NULL;
+    }
     bool found;
     int depth = 0;
     while (1) {
         size_t i = btree_search(btree, node, key, &found, hint, depth);
-        if (found) return btree_get_item_at((void*)btree, node, i);
-        if (node->leaf) return NULL;
+        if (found) {
+            return btree_get_item_at((void*)btree, node, i);
+        }
+        if (node->leaf) {
+            return NULL;
+        }
         node = node->children[i];
         depth++;
     }
@@ -667,16 +683,15 @@ static enum btree_mut_result btree_node_delete(struct btree *btree,
 {
     size_t i = 0;
     bool found = false;
-    switch (act) {
-    case BTREE_POPMAX:
+    if (act == BTREE_DELKEY) {
+        i = btree_search(btree, node, key, &found, hint, depth);
+    } else if (act == BTREE_POPMAX) {
         i = node->nitems-1;
         found = true;
-        break;
-    case BTREE_POPFRONT:
+    } else if (act == BTREE_POPFRONT) {
         i = 0;
         found = node->leaf;
-        break;
-    case BTREE_POPBACK:
+    } else if (act == BTREE_POPBACK) {
         if (!node->leaf) {
             i = node->nitems;
             found = false;
@@ -684,10 +699,6 @@ static enum btree_mut_result btree_node_delete(struct btree *btree,
             i = node->nitems-1;
             found = true;
         }
-        break;
-    case BTREE_DELKEY:
-        i = btree_search(btree, node, key, &found, hint, depth);
-        break;
     }
     if (node->leaf) {
         if (found) {
@@ -700,7 +711,6 @@ static enum btree_mut_result btree_node_delete(struct btree *btree,
         }
         return BTREE_NOCHANGE;
     }
-
     enum btree_mut_result result;
     if (found) {
         if (act == BTREE_POPMAX) {
@@ -712,7 +722,9 @@ static enum btree_mut_result btree_node_delete(struct btree *btree,
                 return BTREE_NOMEM);
             result = btree_node_delete(btree, node->children[i], BTREE_POPMAX,
                 0, NULL, prev, hint, depth+1);
-            if (result == BTREE_NOMEM) return BTREE_NOMEM;
+            if (result == BTREE_NOMEM) {
+                return BTREE_NOMEM;
+            }
             result = BTREE_DELETED;
         } else {
             // item was found in branch, copy its contents, delete it, and 
@@ -722,9 +734,11 @@ static enum btree_mut_result btree_node_delete(struct btree *btree,
             btree_cow_node_or(node->children[i==node->nitems?i-1:i+1], 
                 return BTREE_NOMEM);
             result = btree_node_delete(btree, node->children[i], BTREE_POPMAX,
-                0, NULL, BTREE_SPARE_POP, hint, depth+1);
-            if (result == BTREE_NOMEM) return BTREE_NOMEM;
-            btree_set_item_at(btree, node, i, BTREE_SPARE_POP);
+                0, NULL, BTREE_SPARE_POPMAX, hint, depth+1);
+            if (result == BTREE_NOMEM) {
+                return BTREE_NOMEM;
+            }
+            btree_set_item_at(btree, node, i, BTREE_SPARE_POPMAX);
             result = BTREE_DELETED;
         }
     } else {
@@ -748,7 +762,9 @@ static void *btree_delete0(struct btree *btree, enum btree_delact act,
     size_t index, const void *key, uint64_t *hint) 
 {
     btree->oom = false;
-    if (!btree->root) return NULL;
+    if (!btree->root) {
+        return NULL;
+    }
     btree_cow_node_or(btree->root, goto oom);
     enum btree_mut_result result = btree_node_delete(btree, btree->root, act,
         index, key, BTREE_SPARE_RETURN, hint, 0);
@@ -1009,7 +1025,9 @@ static bool btree_node_descend(const struct btree *btree,
                 return false;
             }
         }
-        if (i == 0) return true;
+        if (i == 0) {
+            return true;
+        }
         i--;
     }
     while(1) {
@@ -1051,7 +1069,9 @@ bool btree_descend(const struct btree *btree, const void *pivot,
 BTREE_EXTERN
 const void *btree_min(const struct btree *btree) {
     struct btree_node *node = btree->root;
-    if (!node) return NULL;
+    if (!node) {
+        return NULL;
+    }
     while (1) {
         if (node->leaf) {
             return btree_get_item_at((void*)btree, node, 0);
@@ -1063,7 +1083,9 @@ const void *btree_min(const struct btree *btree) {
 BTREE_EXTERN
 const void *btree_max(const struct btree *btree) {
     struct btree_node *node = btree->root;
-    if (!node) return NULL;
+    if (!node) {
+        return NULL;
+    }
     while (1) {
         if (node->leaf) {
             return btree_get_item_at((void*)btree, node, node->nitems-1);
@@ -1102,7 +1124,9 @@ const void *btree_load(struct btree *btree, const void *item) {
         node = node->children[node->nitems];
     }
     const void *prev = btree_set0(btree, item, NULL, true);
-    if (!btree->oom) return prev;
+    if (!btree->oom) {
+        return prev;
+    }
 oom:
     if (btree->item_free && item_cloned) {
         btree->item_free(BTREE_SPARE_CLONE, btree->udata);
