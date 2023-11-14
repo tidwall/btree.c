@@ -468,6 +468,14 @@ void test_btree_various(void) {
     assert(btree_sane(btree));
     btree_free(btree);
 
+    // btree = btree_new(sizeof(int), 32, compare_ints, nothing);
+    // for (int i = 0; i < 1000000; i++) assert(!btree_set(btree, &i));
+    // for (int i = 0; i < 1000000; i++) assert(btree_get(btree, &i));
+    // // printf("%d\n", btree_height(btree));
+    // // assert(btree_height(btree) == 2);
+    // assert(btree_sane(btree));
+    // btree_free(btree);
+
 }
 
 void pair_print(void *item) {
@@ -513,15 +521,95 @@ void test_btree_delete(void) {
         assert(!v);
     }
 
-
     btree_free(btree);
     xfree(pairs);
+}
+
+void test_btree_iter(void) {
+    int N = 1000;
+    struct btree *btree = btree_new_for_test(sizeof(int), 5, compare_ints, nothing);
+    struct btree_iter *iter = btree_iter_new(btree);
+    assert(*(int*)(btree_iter_item(iter)) == 0);
+    assert(!btree_iter_seek(iter, 0));
+    assert(!btree_iter_next(iter));
+    assert(!btree_iter_prev(iter));
+    assert(!btree_iter_first(iter));
+    assert(!btree_iter_last(iter));
+    btree_iter_free(iter);
+    for (int i = 0; i < N; i++) assert(!btree_set(btree, &i));
+    for (int i = 0; i < N; i++) assert(btree_get(btree, &i));
+    iter = btree_iter_new(btree);
+    assert(*(int*)(btree_iter_item(iter)) == 0);
+    assert(btree_iter_next(iter));
+    assert(*(int*)(btree_iter_item(iter)) == 0);
+    assert(btree_iter_next(iter));
+    assert(*(int*)(btree_iter_item(iter)) == 1);
+
+    // btree_iter_first, btree_iter_next
+    assert(btree_iter_first(iter));
+    for (int i = 0; i < N; i++) {
+        assert(*(int*)(btree_iter_item(iter)) == i);
+        if (i == N-1) {
+            assert(!btree_iter_next(iter));
+        } else {
+            assert(btree_iter_next(iter));
+        }
+    }
+    assert(*(int*)(btree_iter_item(iter)) == N-1);
+
+    // btree_iter_last, btree_iter_prev
+    assert(btree_iter_last(iter));
+    for (int i = 0; i < N; i++) {
+        assert(*(int*)(btree_iter_item(iter)) == N-i-1);
+        if (i == N-1) {
+            assert(!btree_iter_prev(iter));
+        } else {
+            assert(btree_iter_prev(iter));
+        }
+    }
+    assert(*(int*)(btree_iter_item(iter)) == 0);
+
+    // btree_iter_seek
+    for (int i = 0; i < N; i++) {
+        // btree_iter_seek, btree_iter_next
+        assert(btree_iter_seek(iter, &i));
+        for (int j = i; j < N; j++) {
+            assert(*(int*)(btree_iter_item(iter)) == j);
+            if (j == N-1) {
+                assert(!btree_iter_next(iter));
+            } else {
+                assert(btree_iter_next(iter));
+            }
+        }
+        assert(*(int*)(btree_iter_item(iter)) == N-1);
+
+        // btree_iter_seek, btree_iter_prev
+        assert(btree_iter_seek(iter, &i));
+        for (int j = i; j >= 0; j--) {
+            assert(*(int*)(btree_iter_item(iter)) == j);
+            if (j == 0) {
+                assert(!btree_iter_prev(iter));
+            } else {
+                assert(btree_iter_prev(iter));
+            }
+        }
+    }
+    btree_iter_free(iter);
+
+    assert(!btree_set(btree, &(int){ N+100 }));
+    iter = btree_iter_new(btree);
+    assert(iter);
+    assert(btree_iter_seek(iter, &(int){ N+1 }));
+    assert(*(int*)(btree_iter_item(iter)) == N+100);
+    btree_iter_free(iter);
+    btree_free(btree);
 }
 
 int main(int argc, char **argv) {
     do_chaos_test(test_btree_operations);
     do_chaos_test(test_btree_load);
     do_chaos_test(test_btree_delete);
+    do_test(test_btree_iter);
     do_test(test_btree_various);
     return 0;
 }

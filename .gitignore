@@ -3,3 +3,4 @@
 *.out
 *.o
 scrap.*
+main.c

@@ -9,6 +9,7 @@ A B-tree implementation in C.
 - Copy-on-write support
 - ANSI C (C17)
 - Supports custom allocators
+- 100% code coverage
 - Pretty darn good performance 🚀
 
 ## Example
@@ -72,6 +73,15 @@ int main() {
     printf("\n-- iterate beginning with last name `Murphy` --\n");
     btree_ascend(tr, &(struct user){.first="",.last="Murphy"}, user_iter, NULL);
 
+    printf("\n-- loop iterator (same as previous) --\n");
+    struct btree_iter *iter = btree_iter_new(btree);
+    bool ok = btree_seek(iter, &(struct user){.first="",.last="Murphy"});
+    while (ok) {
+        const struct user *user = btree_item(iter);
+        printf("%s %s (age=%d)\n", user->first, user->last, user->age);
+        ok = btree_next(iter);
+    }
+
     btree_free(tr);
 }
 
@@ -90,6 +100,10 @@ int main() {
 // -- iterate beginning with last name `Murphy` --
 // Dale Murphy (age=44)
 // Jane Murphy (age=47)
+//
+// -- loop iterator (same as previous) --
+// Dale Murphy (age=44)
+// Jane Murphy (age=47)
 ```
 
 ## Functions
@@ -97,20 +111,32 @@ int main() {
 ### Basic
 
 ```sh
-btree_new      # allocate a new btree
-btree_free     # free the btree
-btree_count    # number of items in the btree
-btree_set      # insert or replace an existing item and return the previous
-btree_get      # get an existing item
-btree_delete   # delete and return an item
-btree_clone    # make an clone of the btree using a copy-on-write technique
+btree_new     # allocate a new btree
+btree_free    # free the btree
+btree_count   # number of items in the btree
+btree_set     # insert or replace an existing item and return the previous
+btree_get     # get an existing item
+btree_delete  # delete and return an item
+btree_clone   # make an clone of the btree using a copy-on-write technique
 ```
 
-### Iteration
+### Callback iteration
 
 ```sh
 btree_ascend   # iterate over items in ascending order starting at pivot point.
 btree_descend  # iterate over items in descending order starting at pivot point.
+```
+
+### Loop iteration
+
+```sh
+btree_iter_new      # allocate a new the iterator
+btree_iter_free     # free the iterator
+btree_iter_seek     # seek to an item
+btree_iter_next     # iterate to the next item
+btree_iter_prev     # iterate to the previous item
+btree_iter_first    # seek to the first item in the btree
+btree_iter_last     # seek to the last item in the btree
 ```
 
 ### Queues
