@@ -35,13 +35,39 @@ int compare_itype(const void *a, const void *b, void *udata) {
     return compare_itype_nudata(a, b);
 }
 
+int isearch(const void *items, size_t nitems, const void *key, bool *found, 
+    void *udata)
+{
+    const int ikey = *(int*)key;
+    const int *ints = items;
+    *found = false;
+    size_t i = 0;
+    for (; i < nitems; i++) {
+        if (ikey <= ints[i]) {
+            *found = ikey == ints[i];
+            break;
+        }
+    }
+    return i;
+}
+
 int main() {
     int seed = getenv("SEED")?atoi(getenv("SEED")):time(NULL);
-    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):256;
+    int max_items = getenv("MAX_ITEMS")?atoi(getenv("MAX_ITEMS")):32;
     int N = getenv("N")?atoi(getenv("N")):1000000;
+    bool bsearch = (getenv("BSEARCH") && atoi(getenv("BSEARCH")));
     printf("seed=%d, max_items=%d, count=%d, item_size=%zu\n", 
         seed, max_items, N, sizeof(itype));
     srand(seed);
+
+    int (*searcher)(const void *items, size_t nitems, const void *key, 
+        bool *found, void *udata);
+
+    if (bsearch) {
+        searcher = NULL;
+    } else {
+        searcher = isearch;
+    }
 
     init_test_allocator(false);
 
@@ -56,6 +82,7 @@ int main() {
     uint64_t hint = 0;
 
     btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
+    btree_set_searcher(btree, searcher);
     qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("load (seq)", N, {
         btree_load(btree, &vals[i]);
@@ -64,6 +91,7 @@ int main() {
 
     shuffle(vals, N, sizeof(itype));
     btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
+    btree_set_searcher(btree, searcher);
     bench("load (rand)", N, {
         btree_set_hint(btree, &vals[i], &hint);
     })
@@ -71,6 +99,7 @@ int main() {
 
 
     btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
+    btree_set_searcher(btree, searcher);
     qsort(vals, N, sizeof(itype), compare_itype_nudata);
     bench("set (seq)", N, {
         btree_set(btree, &vals[i]);
@@ -88,6 +117,7 @@ int main() {
     ////
     shuffle(vals, N, sizeof(itype));
     btree = btree_new_for_test(sizeof(itype), max_items, compare_itype, NULL);
+    btree_set_searcher(btree, searcher);
     bench("set (rand)", N, {
         btree_set(btree, &vals[i]);
     })

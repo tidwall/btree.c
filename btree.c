@@ -79,6 +79,8 @@ struct btree {
     void *(*realloc)(void *, size_t);
     void (*free)(void *);
     int (*compare)(const void *a, const void *b, void *udata);
+    int (*searcher)(const void *items, size_t nitems, const void *key,
+        bool *found, void *udata);
     bool (*item_clone)(const void *item, void *into, void *udata);
     void (*item_free)(const void *item, void *udata);
     void *udata;             // user data
@@ -95,6 +97,14 @@ struct btree {
 
 static void *btree_spare_at(const struct btree *btree, size_t index) {
     return (void*)(btree->spare_data+btree->spare_elsize*index);
+}
+
+BTREE_EXTERN
+void btree_set_searcher(struct btree *btree, 
+    int (*searcher)(const void *items, size_t nitems, const void *key, 
+        bool *found, void *udata))
+{
+    btree->searcher = searcher;
 }
 
 #define BTREE_NSPARES 4
@@ -456,8 +466,12 @@ struct btree *btree_clone(struct btree *btree) {
 static size_t btree_search(const struct btree *btree, struct btree_node *node,
     const void *key, bool *found, uint64_t *hint, int depth) 
 {
-    if (!hint) {
+    if (!hint && !btree->searcher) {
         return btree_node_bsearch(btree, node, key, found);
+    }
+    if (btree->searcher) {
+        return btree->searcher(node->items, node->nitems, key, found, 
+            btree->udata);
     }
     return btree_node_bsearch_hint(btree, node, key, found, hint, depth);
 }

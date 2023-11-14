@@ -164,26 +164,26 @@ $ tests/run.sh        # run tests
 $ tests/run.sh bench  # run benchmarks
 ```
 
-The following benchmarks were run on my 2021 Apple M1 Max using gcc-12.
+The following benchmarks were run on my 2021 Apple M1 Max using clang-17.
 The items are simple 4-byte ints.
 
 ```
-seed=1683231129, max_items=256, count=1000000, item_size=4
-load (seq)     1,000,000 ops in 0.010 secs   10.5 ns/op    95,419,847 op/sec  8.32 bytes/op  0.01 allocs/op
-load (rand)    1,000,000 ops in 0.175 secs  175.1 ns/op     5,709,457 op/sec  5.92 bytes/op  0.01 allocs/op
-set (seq)      1,000,000 ops in 0.080 secs   80.3 ns/op    12,452,524 op/sec  8.32 bytes/op  0.01 allocs/op
-set (seq-hint) 1,000,000 ops in 0.025 secs   24.8 ns/op    40,309,577 op/sec  8.32 bytes/op  0.01 allocs/op
-set (rand)     1,000,000 ops in 0.165 secs  165.0 ns/op     6,059,210 op/sec  5.93 bytes/op  0.01 allocs/op
-get (seq)      1,000,000 ops in 0.081 secs   80.5 ns/op    12,421,588 op/sec
-get (seq-hint) 1,000,000 ops in 0.088 secs   87.5 ns/op    11,426,220 op/sec
-get (rand)     1,000,000 ops in 0.117 secs  116.9 ns/op     8,555,271 op/sec
-delete (rand)  1,000,000 ops in 0.148 secs  147.6 ns/op     6,774,792 op/sec
-min            1,000,000 ops in 0.001 secs    1.3 ns/op   797,448,165 op/sec
-max            1,000,000 ops in 0.002 secs    1.7 ns/op   579,710,144 op/sec
-ascend         1,000,000 ops in 0.001 secs    1.0 ns/op 1,018,329,938 op/sec
-descend        1,000,000 ops in 0.001 secs    1.0 ns/op 1,040,582,726 op/sec
-pop-min        1,000,000 ops in 0.028 secs   27.7 ns/op    36,039,932 op/sec
-pop-max        1,000,000 ops in 0.018 secs   17.7 ns/op    56,404,760 op/sec
+seed=1699992514, max_items=32, count=1000000, item_size=4
+load (seq)     1,000,000 ops in 0.019 secs   19.3 ns/op    51,939,957 op/sec 10.67 bytes/op  0.07 allocs/op
+load (rand)    1,000,000 ops in 0.106 secs  105.7 ns/op     9,461,185 op/sec  7.28 bytes/op  0.05 allocs/op
+set (seq)      1,000,000 ops in 0.078 secs   78.0 ns/op    12,817,719 op/sec 10.67 bytes/op  0.07 allocs/op
+set (seq-hint) 1,000,000 ops in 0.039 secs   39.3 ns/op    25,415,544 op/sec 10.67 bytes/op  0.07 allocs/op
+set (rand)     1,000,000 ops in 0.105 secs  105.0 ns/op     9,524,172 op/sec  7.26 bytes/op  0.05 allocs/op
+get (seq)      1,000,000 ops in 0.042 secs   41.8 ns/op    23,930,887 op/sec
+get (seq-hint) 1,000,000 ops in 0.046 secs   46.5 ns/op    21,525,744 op/sec
+get (rand)     1,000,000 ops in 0.093 secs   93.1 ns/op    10,745,524 op/sec
+delete (rand)  1,000,000 ops in 0.120 secs  120.4 ns/op     8,304,958 op/sec
+min            1,000,000 ops in 0.003 secs    3.1 ns/op   322,372,662 op/sec
+max            1,000,000 ops in 0.003 secs    3.2 ns/op   311,429,461 op/sec
+ascend         1,000,000 ops in 0.001 secs    1.4 ns/op   706,713,780 op/sec
+descend        1,000,000 ops in 0.001 secs    1.2 ns/op   801,282,051 op/sec
+pop-min        1,000,000 ops in 0.023 secs   23.2 ns/op    43,044,077 op/sec
+pop-max        1,000,000 ops in 0.020 secs   19.9 ns/op    50,130,338 op/sec
 ```
 
 ## License

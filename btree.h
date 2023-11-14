@@ -183,9 +183,12 @@ bool btree_descend_hint(const struct btree *btree, const void *pivot,
     bool (*iter)(const void *item, void *udata), 
     void *udata, uint64_t *hint);
 
-// DEPRECATED: use `btree_new_with_allocator`
-void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*));
+// btree_set_searcher allows for setting a custom search function.
+void btree_set_searcher(struct btree *btree, 
+    int (*searcher)(const void *items, size_t nitems, const void *key, 
+        bool *found, void *udata));
 
+// Loop-based iterator
 struct btree_iter *btree_iter_new(const struct btree *btree);
 void btree_iter_free(struct btree_iter *iter);
 bool btree_iter_first(struct btree_iter *iter);
@@ -194,5 +197,10 @@ bool btree_iter_next(struct btree_iter *iter);
 bool btree_iter_prev(struct btree_iter *iter);
 bool btree_iter_seek(struct btree_iter *iter, const void *key);
 const void *btree_iter_item(struct btree_iter *iter);
+
+
+// DEPRECATED: use `btree_new_with_allocator`
+void btree_set_allocator(void *(malloc)(size_t), void (*free)(void*));
+
 
 #endif

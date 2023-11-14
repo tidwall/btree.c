@@ -605,11 +605,38 @@ void test_btree_iter(void) {
     btree_free(btree);
 }
 
+int isearch(const void *items, size_t nitems, const void *key, bool *found, 
+    void *udata)
+{
+    assert(udata == nothing);
+    const int ikey = *(int*)key;
+    const int *ints = items;
+    size_t i = 0;
+    for (; i < nitems; i++) {
+        if (ikey <= ints[i]) {
+            *found = ikey == ints[i];
+            return i;
+        }
+    }
+    *found = false;
+    return i;
+}
+
+void test_btree_searcher(void) {
+    struct btree *btree = btree_new_for_test(sizeof(int), 10, compare_ints, nothing);
+    btree_set_searcher(btree, isearch);
+    for (int i = 0; i < 1000; i++) assert(!btree_set(btree, &i));
+    for (int i = 0; i < 1000; i++) assert(*(int*)btree_get(btree, &i) == i);
+    assert(btree_sane(btree));
+    btree_free(btree);
+}
+
 int main(int argc, char **argv) {
     do_chaos_test(test_btree_operations);
     do_chaos_test(test_btree_load);
     do_chaos_test(test_btree_delete);
     do_test(test_btree_iter);
     do_test(test_btree_various);
+    do_test(test_btree_searcher);
     return 0;
 }
