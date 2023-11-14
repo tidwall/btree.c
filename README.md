@@ -75,12 +75,13 @@ int main() {
 
     printf("\n-- loop iterator (same as previous) --\n");
     struct btree_iter *iter = btree_iter_new(btree);
-    bool ok = btree_seek(iter, &(struct user){.first="",.last="Murphy"});
+    bool ok = btree_iter_seek(iter, &(struct user){.first="",.last="Murphy"});
     while (ok) {
-        const struct user *user = btree_item(iter);
+        const struct user *user = btree_iter_item(iter);
         printf("%s %s (age=%d)\n", user->first, user->last, user->age);
-        ok = btree_next(iter);
+        ok = btree_iter_next(iter);
     }
+    btree_iter_free(iter);
 
     btree_free(tr);
 }
