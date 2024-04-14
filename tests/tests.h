@@ -100,7 +100,7 @@ double now(void) {
 
 static bool rand_alloc_fail = false;
 // 1 in 10 chance malloc or realloc will fail.
-static int rand_alloc_fail_odds = 3; 
+static int rand_alloc_fail_odds = 3;
 
 static void *xmalloc(size_t size) {
     if (rand_alloc_fail && rand()%rand_alloc_fail_odds == 0) {
@@ -146,7 +146,7 @@ void cleanup_test_allocator(void) {
 //     int (*compare)(const void *a, const void *b, void *udata),
 //     void *udata)
 // {
-//     return btree_new_with_allocator(__malloc, NULL, __free, elsize, max_items, 
+//     return btree_new_with_allocator(__malloc, NULL, __free, elsize, max_items,
 //         compare, udata);
 // }
 
@@ -154,7 +154,7 @@ struct btree *btree_new_for_test(size_t elsize, size_t degree,
     int (*compare)(const void *a, const void *b, void *udata),
     void *udata)
 {
-    return btree_new_with_allocator(__malloc, NULL, __free, elsize, 
+    return btree_new_with_allocator(__malloc, NULL, __free, elsize,
         degree, compare, udata);
 }
 
@@ -165,7 +165,7 @@ char *commaize(unsigned int n) {
     assert(s2);
     memset(s2, 0, sizeof(64));
     snprintf(s1, sizeof(s1), "%d", n);
-    int i = strlen(s1)-1; 
+    int i = strlen(s1)-1;
     int j = 0;
 	while (i >= 0) {
 		if (j%3 == 0 && j != 0) {
@@ -339,5 +339,3 @@ void rsleep(double min_secs, double max_secs) {
 }
 
 #endif // TESTS_H
-
-
