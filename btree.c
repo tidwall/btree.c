@@ -492,18 +492,18 @@ static void btree_node_split(struct btree *btree, struct btree_node *node,
     if (!*right) {
         return; // NOMEM
     }
-    int mid = (int)(btree->max_items)/2;
-    *median = btree_get_item_at(btree, node, (size_t)mid);
+    size_t mid = btree->max_items / 2;
+    *median = btree_get_item_at(btree, node, mid);
     (*right)->leaf = node->leaf;
-    (*right)->nitems = node->nitems-((short)mid+1);
-    memmove((*right)->items, node->items+(int)btree->elsize*(mid+1),
-        (size_t)(*right)->nitems*btree->elsize);
+    (*right)->nitems = node->nitems-(mid+1);
+    memmove((*right)->items, node->items+btree->elsize*(mid+1),
+        (*right)->nitems*btree->elsize);
     if (!node->leaf) {
         for (size_t i = 0; i <= (*right)->nitems; i++) {
             (*right)->children[i] = node->children[mid+1+i];
         }
     }
-    node->nitems = (short)mid;
+    node->nitems = mid;
 }
 
 static enum btree_mut_result btree_node_set(struct btree *btree,
