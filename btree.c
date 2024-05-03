@@ -417,7 +417,7 @@ failed:
     if (btree_rc_load(&(bnode)->rc) > 0) { \
         struct btree_node *node2 = btree_node_copy(btree, (bnode)); \
         if (!node2) { code; } \
-        btree_rc_fetch_sub(&(bnode)->rc, 1); \
+        btree_node_free(btree, bnode); \
         (bnode) = node2; \
     } \
 }
