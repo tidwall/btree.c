@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -162,6 +163,7 @@ static void btree_node_shift_left(struct btree *btree, struct btree_node *node,
     if (!node->leaf) {
         if (for_merge) {
             index++;
+            num_items_to_shift--;
         }
         memmove(&node->children[index], &node->children[index+1],
             (num_items_to_shift+1)*sizeof(struct btree_node*));
