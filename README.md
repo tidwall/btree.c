@@ -74,7 +74,7 @@ int main() {
     btree_ascend(tr, &(struct user){.first="",.last="Murphy"}, user_iter, NULL);
 
     printf("\n-- loop iterator (same as previous) --\n");
-    struct btree_iter *iter = btree_iter_new(btree);
+    struct btree_iter *iter = btree_iter_new(tr);
     bool ok = btree_iter_seek(iter, &(struct user){.first="",.last="Murphy"});
     while (ok) {
         const struct user *user = btree_iter_item(iter);
