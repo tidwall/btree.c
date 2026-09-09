@@ -1,3 +1,5 @@
+**This project has been archived. Please check out [btree.h](https://github.com/tidwall/btree.h) for a fitter, happier, more productive B-tree.**
+
 # btree.c
 
 A B-tree implementation in C. 
